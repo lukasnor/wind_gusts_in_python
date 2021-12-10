@@ -1,10 +1,12 @@
 import time
 from typing import Dict
 import numpy as np
+from pywatts.core.exceptions import InputNotAvailable
 import xarray as xr
 from pywatts.core.base import BaseEstimator
 import rpy2.robjects as robjects
 from rpy2.robjects import numpy2ri
+from pywatts.utils._xarray_time_series_utils import numpy_to_xarray
 
 # Import the 'scoringRules' library from R, since yet no worthy equivalent exists for Python
 from scipy.optimize import minimize
@@ -38,6 +40,7 @@ class EmosModel(BaseEstimator):
 
         self.model_type = model_type
         self.par_start = par_start
+        self.par_fitted = par_start
         self.t_sd = t_sd
         # Threshold for Nelder-Mead improvement
         self.t_nelder = 1e-3
@@ -63,30 +66,31 @@ class EmosModel(BaseEstimator):
         self.par_start = kwargs["par_start"]
         self.t_sd = kwargs["t_sd"]
 
-    def fn_loc(self, a, b):
+    # TODO Make those functions static.
+    def _fn_loc(self, a, b):
         return np.maximum(-self.t_max, np.minimum(self.t_max, a + np.exp(b) * self.ens_mean))
 
-    def fn_scale(self, c, d):
+    def _fn_scale(self, c, d):
         return np.maximum(self.t_min, np.minimum(self.t_max, np.exp(c + d * np.log(self.ens_sd))))
 
-    def fn_sr(self, location, scale):
+    def _fn_sr(self, location, scale):
         return crps_tlogis(y=self.obs, location=location, scale=scale, lower=0)
 
-    def fn_grad(self, location, scale):
+    def _fn_grad(self, location, scale):
         return gradcrps_tlogis(y=self.obs, location=location, scale=scale, lower=0)
 
     def wrapper(self, par_emos):
         #### Calculation ####
         # Calculate location and scale parameters
-        loc_emos = self.fn_loc(  # ens_mean=self.ens_mean,
+        loc_emos = self._fn_loc(  # ens_mean=self.ens_mean,
             a=par_emos[0],
             b=par_emos[1])
-        scale_emos = self.fn_scale(  # ens_sd=self.ens_sd,
+        scale_emos = self._fn_scale(  # ens_sd=self.ens_sd,
             c=par_emos[2],
             d=par_emos[3])
 
         # Calculate mean scores of training data
-        res = np.mean(self.fn_sr(  # y=self.obs,
+        res = np.mean(self._fn_sr(  # y=self.obs,
             location=loc_emos,
             scale=scale_emos))
 
@@ -99,15 +103,15 @@ class EmosModel(BaseEstimator):
         #          name_function="wrapper in emos_est")
         return res
 
-    def grad(self, par_emos):
+    def _grad(self, par_emos):
 
         result = [0, 1, 0, 1]
         # Calculate location and scale parameters for each ensemble
-        loc_emos = self.fn_loc(a=par_emos[0], b=par_emos[1])
-        scale_emos = self.fn_scale(c=par_emos[2], d=par_emos[3])
+        loc_emos = self._fn_loc(a=par_emos[0], b=par_emos[1])
+        scale_emos = self._fn_scale(c=par_emos[2], d=par_emos[3])
 
         # Calculate gradient of CRPS
-        s_grad = self.fn_grad(  # y=self.obs,
+        s_grad = self._fn_grad(  # y=self.obs,
             location=loc_emos, scale=scale_emos)
 
         # Derivatives w.r.t. a and b
@@ -127,8 +131,8 @@ class EmosModel(BaseEstimator):
         # Check for complete input
         for name in names:
             if name not in kwargs.keys():
-                print("Emos-fit:", name, "not in parameters.")
-                raise Exception()
+                s = "EmosModel.fit(): " + name + " not in parameters."
+                raise InputNotAvailable(s)
 
         self.obs = np.array(kwargs["obs"])
         self.ens_mean = np.array(kwargs["ens_mean"])
@@ -148,15 +152,34 @@ class EmosModel(BaseEstimator):
         # Set initial values (a = c = 0, b/exp(b) = d = 1, i.e. ensemble mean and standard deviation as parameters)
 
         start_time = time.time()
-        estimation = minimize(self.wrapper, np.array(self.par_start), method='BFGS', jac=self.grad,
-                              options={'disp': True})
+        estimation = minimize(self.wrapper, np.array(self.par_start), method='BFGS', jac=self._grad
+                              # ,options={'disp': True}
+                              )
         stop_time = time.time()
 
-        print([estimation.x, len(self.obs), str(stop_time - start_time) + " seconds"])
+        self.is_fitted = True
+        self.par_fitted = estimation.x
         return [estimation.x, len(self.obs), str(stop_time - start_time) + " seconds"]
 
-    # Stub
     def transform(self, **kwargs: Dict[str, xr.DataArray]):
-        print("EmosModel transform function called with parameters:")
-        print(kwargs)
-        return xr.DataArray(data=[0, 1], dims=["x"])
+        test_vars = ["ens_mean", "ens_sd"]
+        for test_var in test_vars:
+            if test_var not in kwargs.keys():
+                raise InputNotAvailable(
+                    "EmosModel.transform(): ens_mean or ens_sd is missing in kwargs.keys():" + str(kwargs.keys()))
+
+        ens_mean, ens_sd = kwargs["ens_mean"], kwargs["ens_sd"]
+
+        # Cut standard deviation to t_sd
+        if not self.t_sd == 0:
+            ens_sd = np.maximum(self.t_sd, ens_sd)
+
+        a, b, c, d = self.par_fitted
+        location = a + np.exp(b) * ens_mean
+        scale = np.exp(c + d * np.log(ens_sd))
+        times = ens_mean["index"]
+        times = times.rename("time") # Rename xarray
+        times = times.rename({"index":"time"}) # Rename its coordinates
+        return xr.DataArray(data=np.stack((location, scale), axis=1)
+                         , dims=["time", "params"]
+                         , coords={"time": times, "params": ["location", "scale"]})

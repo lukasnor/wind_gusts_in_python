@@ -1,20 +1,25 @@
+# Imports
 import pandas as pd
+import tensorflow as tf
 from keras import layers, Model
 import numpy as np
 import tensorflow_probability as tfp
+from keras.callbacks import EarlyStopping
 
-# Import standard logistic distribution for the custom loss
+#  Import standard logistic distribution for the custom loss
 tfd = tfp.distributions.Logistic(1, 0)
 
 
 # Custom loss function
 def custom_loss(y_true, y_pred):
     # Get location and scale
-    mu = np.dot(y_pred, np.array([[1], [0]]))
-    sigma = np.dot(y_pred, np.array([[0], [1]]))
+    # mu = np.dot(y_pred, np.array([[1], [0]]))
+    mu = y_pred[0]
+    # sigma = np.dot(y_pred, np.array([[0], [1]]))
+    sigma = y_pred[1]
 
     # Truncated in zero
-    z = np.maximum(0, y_true)
+    z = tf.maximum(0.0, y_true)
 
     # Standardization
     z_0 = -mu / sigma  # q ~= -18.4 -> p = 1e-8
@@ -28,16 +33,16 @@ def custom_loss(y_true, y_pred):
     lp_my = tfd.log_cdf(-z_y)  # log( 1 - F(z_y)) = log( F(-z_y) )
 
     # Calculate sigma
-    b = lp_m0 - (1 + 2 * lp_my) / p_m0 - np.square(p_0) * lp_0 / np.square(p_m0)
+    b = lp_m0 - (1 + 2 * lp_my) / p_m0 - tf.square(p_0) * lp_0 / tf.square(p_m0)
 
     # Calculate CRPS
-    res = np.abs(z - y_true) - (z - mu) * (1 + p_0) / p_m0 + sigma * b
+    res = tf.abs(z - y_true) - (z - mu) * (1 + p_0) / p_m0 + sigma * b
 
     # Calculate mean
-    res = np.mean(res)
+    res = tf.math.reduce_mean(res)
 
     # Return mean CRPS
-    return (res)
+    return res
 
 
 def get_keras_model(n_dir_preds, n_loc, emb_dim, lay1, actv):
@@ -47,9 +52,9 @@ def get_keras_model(n_dir_preds, n_loc, emb_dim, lay1, actv):
 
     # Embedding
     station_embedding_part = layers.Embedding(input_dim=n_loc + 1, output_dim=emb_dim, input_length=1)(id_input)
-
+    station_embedding_flat = layers.Flatten()(station_embedding_part)
     # Merge Inputs
-    merged = layers.Concatenate()([dir_input, station_embedding_part])
+    merged = layers.Concatenate()([dir_input, station_embedding_flat])
 
     # Hidden Layers
     hidden1 = layers.Dense(units=lay1, activation=actv)(merged)
@@ -58,34 +63,56 @@ def get_keras_model(n_dir_preds, n_loc, emb_dim, lay1, actv):
     # Outputs
     loc_out = layers.Dense(units=1, activation="softplus")(hidden2)
     scale_out = layers.Dense(units=1, activation="softplus")(hidden2)
-
     output = layers.Concatenate()([loc_out, scale_out])
 
+    # Model
     model = Model(inputs=[id_input, dir_input], outputs=output)
 
     return model
 
 
-if __name__ == '__main__':
-    # Import data
-    train = pd.read_csv("data/df_train.csv", index_col=0)
-    test = pd.read_csv("data/df_test.csv", index_col=0)
+# Import data
+train_data: pd.DataFrame = pd.read_csv("data/df_train.csv", index_col=0)
+test_data: pd.DataFrame = pd.read_csv("data/df_test.csv", index_col=0)
 
-    # Preprocessing pipeline
+# Define Hyperparameters
+hpar_ls = {"n_sim": 10,
+           "lr_adam": 5e-4,  # previously 1e-3
+           "n_epochs": 150,
+           "n_patience": 10,
+           "n_batch": 64,
+           "emb_dim": 10,
+           "lay1": 64,
+           "actv": "softplus",
+           "nn_verbose": 0}
 
-    # Define Hyperparameters
-    hpar_ls = {"n_sim": 10,
-               "lr_adam": 5e-4,  # previously 1e-3
-               "n_epochs": 150,
-               "n_patience": 10,
-               "n_batch": 64,
-               "emb_dim": 10,
-               "lay1": 64,
-               "actv": "softplus",
-               "nn_verbose": 0}
+# Data preparation
 
-    # Data preparation
-    # Remove unnecessary columns, so no individual ensemble members
-    # Split data into training and validation
+# Remove unnecessary columns, so no individual ensemble members
+try:
+    train_vars = train_data.keys().drop(["ens_" + str(i) for i in range(1, 21)])
+except KeyError:
+    print("Keys have already been removed.")
 
-    # Scale dir_preds w/o location
+train_data = train_data.loc[:, train_vars]
+
+# Remove observations from training data
+test_vars = train_vars.drop(["obs"])
+test_data = test_data.loc[:, train_vars]
+
+# Number of direct predictants w.o. location
+dir_pred_vars = train_vars.drop(["location", "obs"])
+print(dir_pred_vars)
+
+# Split data into training and validation
+# val_data = train_data[-10:] # not necessary with validation_split in model.fit()
+
+# Scale dir_preds w/o location
+
+# Test model right here
+model = get_keras_model(n_dir_preds=len(dir_pred_vars), n_loc=len(train_data["location"].unique()),
+                        emb_dim=hpar_ls["emb_dim"], lay1=hpar_ls["lay1"], actv=hpar_ls["actv"])
+model.compile(optimizer="adam", loss=custom_loss)
+# Compile the model
+history = model.fit([train_data["location"], train_data[dir_pred_vars]], train_data["obs"], batch_size=100, epochs=10,
+                    validation_split=0.1, callbacks=EarlyStopping(patience=hpar_ls["n_patience"]))

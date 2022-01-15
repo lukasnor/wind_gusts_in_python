@@ -10,10 +10,10 @@ if __name__ == "__main__":
 
     loc1 = train_data[train_data["location"] == 1]  # only data from location 1
     # train_data.groupby("location")["ens_mean"].mean()
-    #loc1.info()
-    #loc1.iloc[:,7:27].plot()
-    #plt.show()
-    test_data = pd.DataFrame({"loc":loc1.iloc[0],"obs":loc1.iloc[1]})
+    # loc1.info()
+    # loc1.iloc[:,7:27].plot()
+    # plt.show()
+    test_data = pd.DataFrame({"loc": loc1.iloc[0], "obs": loc1.iloc[1]})
     test_data.info()
-    npa =np.array(loc1.iloc[1])
+    npa = np.array(loc1.iloc[1])
     print(npa.mean())

@@ -2,7 +2,6 @@
 *.idea
 pywatts.log
 data/
-src/*.ipynb
 src/pywatts.log
 src/.ipynb_checkpoints
-results
+results/

@@ -13,7 +13,7 @@ tfd = tfp.distributions.Logistic(0, 1)
 
 
 # Custom loss function
-def custom_loss(y_true, y_pred):
+def crps_logistic_loss(y_true, y_pred):
     # Get location and scale
     # mu = np.dot(y_pred, np.array([[1], [0]]))
     mu = y_pred[0]
@@ -45,7 +45,8 @@ def custom_loss(y_true, y_pred):
     return res
 
 
-def get_keras_model(n_dir_preds, n_loc, emb_dim, lay1, actv):
+# Return the model of Benedikt Schulz for estimating location and scale parameters
+def get_benedikts_model(n_dir_preds, n_loc, emb_dim, lay1, actv):
     # Inputs
     id_input = layers.Input(shape=1, name="id_input")  # Maybe names has to be changed to be compatible with pywatts
     dir_input = layers.Input(shape=n_dir_preds, name="dir_input")
@@ -71,54 +72,73 @@ def get_keras_model(n_dir_preds, n_loc, emb_dim, lay1, actv):
     return model
 
 
-# Import data
-train_data: pd.DataFrame = pd.read_csv("data/df_train.csv", index_col=0)
-test_data: pd.DataFrame = pd.read_csv("data/df_test.csv", index_col=0)
+# Test code to see if model with custom loss works
+def try_out():
+    # Import data
+    train_data: pd.DataFrame = pd.read_csv("data/df_train.csv", index_col=0)
+    test_data: pd.DataFrame = pd.read_csv("data/df_test.csv", index_col=0)
 
-# Define Hyperparameters
-hpar_ls = {"n_sim": 10,
-           "lr_adam": 5e-4,  # previously 1e-3
-           "n_epochs": 150,
-           "n_patience": 10,
-           "n_batch": 64,
-           "emb_dim": 10,
-           "lay1": 64,
-           "actv": "softplus",
-           "nn_verbose": 0}
+    # Define Hyperparameters
+    hpar_ls = {"n_sim": 10,
+               "lr_adam": 5e-4,  # previously 1e-3
+               "n_epochs": 150,
+               "n_patience": 10,
+               "n_batch": 64,
+               "emb_dim": 10,
+               "lay1": 64,
+               "actv": "softplus",
+               "nn_verbose": 0}
 
-# Data preparation
+    # Data preparation
 
-# Remove unnecessary columns, so no individual ensemble members
-try:
+    # Remove unnecessary columns, so no individual ensemble members
     train_vars = train_data.keys().drop(["ens_" + str(i) for i in range(1, 21)])
-except KeyError:
-    print("Keys have already been removed.")
 
-train_data = train_data.loc[:, train_vars]
+    train_data = train_data.loc[:, train_vars]
 
-# Remove observations from training data
-test_vars = train_vars.drop(["obs"])
-test_data = test_data.loc[:, train_vars]
+    # Remove observations from training data
+    test_vars = train_vars.drop(["obs"])
+    test_data = test_data.loc[:, train_vars]
 
-# Number of direct predictants w.o. location
-dir_pred_vars = train_vars.drop(["location", "obs"])
+    # Number of direct predictants w.o. location
+    dir_pred_vars = train_vars.drop(["location", "obs"])
 
-# Split data into training and validation
-# val_data = train_data[-10:] # not necessary with validation_split in model.fit()
+    # Split data into training and validation
+    # val_data = train_data[-10:] # not necessary with validation_split in model.fit()
 
-# Test model right here
-model = get_keras_model(n_dir_preds=len(dir_pred_vars),
-                        n_loc=len(train_data["location"].unique()),
-                        emb_dim=hpar_ls["emb_dim"],
-                        lay1=hpar_ls["lay1"],
-                        actv=hpar_ls["actv"])
-model.compile(optimizer="adam", loss=custom_loss)  # vielleicht anderen Loss probieren
-# model.compile(optimizer="adam",loss=keras.losses.mean_squared_error)
-# Compile the model
-history = model.fit([train_data["location"],
-                     train_data[dir_pred_vars]],
-                    train_data["obs"],
-                    batch_size=hpar_ls["n_batch"],
-                    epochs=hpar_ls["n_epochs"],
-                    validation_split=0.1,
-                    callbacks=EarlyStopping(patience=hpar_ls["n_patience"]))
+    # Test model right here
+    model = get_benedikts_model(n_dir_preds=len(dir_pred_vars),
+                                n_loc=len(train_data["location"].unique()),
+                                emb_dim=hpar_ls["emb_dim"],
+                                lay1=hpar_ls["lay1"],
+                                actv=hpar_ls["actv"])
+    model.compile(optimizer="adam", loss=crps_logistic_loss)  # vielleicht anderen Loss probieren
+    # model.compile(optimizer="adam",loss=keras.losses.mean_squared_error)
+    # Compile the model
+    history = model.fit([train_data["location"],
+                         train_data[dir_pred_vars]],
+                        train_data["obs"],
+                        batch_size=hpar_ls["n_batch"],
+                        epochs=hpar_ls["n_epochs"],
+                        validation_split=0.1,
+                        callbacks=EarlyStopping(patience=hpar_ls["n_patience"]))
+
+
+# Forecast from offshore_ensembles_horizon12 -> offshore_observations[speed]
+
+# Import data
+observations: pd.DataFrame = pd.read_csv("data/Offshore_Observations.csv", index_col=0)  # time is index
+observations.index = pd.to_datetime(observations.index)  # convert Index to DateTimeIndex
+pred_vars = observations.keys().drop(["horizon", "is_origin"])  # Index(['u10', 'v10', 'd2m', 't2m', 'msl', 'sp', 'speed'])
+observations = observations[pred_vars]  # Leave out "horizon" and "is_origin" from Observations
+
+ensembles: pd.DataFrame = pd.read_csv("data/Offshore_Ensembles.csv")
+ensembles = ensembles.pivot(index=["horizon", "time"], columns=["number"], values=pred_vars)
+ensembles = ensembles.loc[12, :]  # only use 12 hour horizon
+ensembles.index = pd.to_datetime(ensembles.index)  # convert Index to DateTimeIndex
+observations = observations.loc[ensembles.index]  # only use the observations corresponding to the forecasts
+
+# Plan: Daten nach Train und Test splitten, Pipeline aufbauen, laufen lassen, Calibration anschauen
+# Loss: Nehme Verteilung für wind speed an und nehme CRPS dafür
+# Netz: -Zuerst nur mit wind speed Werten aller Ensembles arbeiten
+#       -später mit allen Spalten arbeiten, dann diese vielleicht zuerst aggregieren?

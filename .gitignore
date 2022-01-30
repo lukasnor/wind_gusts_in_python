@@ -4,4 +4,5 @@ pywatts.log
 data/
 src/pywatts.log
 src/.ipynb_checkpoints
+src/__pycache__/
 results/

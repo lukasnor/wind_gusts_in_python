@@ -1,12 +1,17 @@
 # Imports
-import datetime
 import keras.losses
+import numpy as np
 import pandas as pd
 import tensorflow as tf
-from keras import layers, Model
-import numpy as np
+from keras import layers, Model, optimizers
 import tensorflow_probability as tfp
 from keras.callbacks import EarlyStopping
+from pywatts.core.pipeline import Pipeline
+from pywatts.modules import SKLearnWrapper, KerasWrapper
+from sklearn.preprocessing import StandardScaler
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+mpl.use('TkAgg')
 
 #  Import standard logistic distribution for the custom loss
 tfd = tfp.distributions.Logistic(0, 1)
@@ -72,6 +77,20 @@ def get_benedikts_model(n_dir_preds, n_loc, emb_dim, lay1, actv):
     return model
 
 
+# A simple aggregation model to summarize ensemble member info wrt to one variable
+def get_aggregation_model(name: str, n_ens, width: int, activations):
+    input = layers.Input(shape=n_ens, name="input")
+    hidden1 = layers.Dense(name="hidden1", units=width, activation=activations[0])(input)
+    hidden2 = layers.Dense(name="hidden2", units=width, activation=activations[1])(hidden1)
+    output = layers.Dense(units=1)(hidden2)
+    model = Model(name=name, inputs=input, outputs=output)
+    return model
+
+
+def get_drn_model(names: [str], ):
+    return None
+
+
 # Test code to see if model with custom loss works
 def try_out():
     # Import data
@@ -124,19 +143,79 @@ def try_out():
                         callbacks=EarlyStopping(patience=hpar_ls["n_patience"]))
 
 
-# Forecast from offshore_ensembles_horizon12 -> offshore_observations[speed]
+# Forecast from offshore_ensembles_horizon12 -> offshore_observations
 
 # Import data
 observations: pd.DataFrame = pd.read_csv("data/Offshore_Observations.csv", index_col=0)  # time is index
 observations.index = pd.to_datetime(observations.index)  # convert Index to DateTimeIndex
-pred_vars = observations.keys().drop(["horizon", "is_origin"])  # Index(['u10', 'v10', 'd2m', 't2m', 'msl', 'sp', 'speed'])
-observations = observations[pred_vars]  # Leave out "horizon" and "is_origin" from Observations
+pred_vars = observations.keys().drop(
+    ["horizon", "is_origin"])  # Index(['u10', 'v10', 'd2m', 't2m', 'msl', 'sp', 'speed'])
+observations = observations[pred_vars]  # leave out "horizon" and "is_origin" from observations
+observations = observations.sort_index(level=0)
 
 ensembles: pd.DataFrame = pd.read_csv("data/Offshore_Ensembles.csv")
-ensembles = ensembles.pivot(index=["horizon", "time"], columns=["number"], values=pred_vars)
-ensembles = ensembles.loc[12, :]  # only use 12 hour horizon
-ensembles.index = pd.to_datetime(ensembles.index)  # convert Index to DateTimeIndex
-observations = observations.loc[ensembles.index]  # only use the observations corresponding to the forecasts
+ensembles["time"] = pd.to_datetime(ensembles["time"], infer_datetime_format=True)  # convert time column to datetime
+ensembles = ensembles.pivot(index=["horizon", "time", "number"], columns=[])  # create multiindex
+ensembles = ensembles[pred_vars]  # reduce columns to necessary ones
+ensembles = ensembles.sort_index(
+    level=[0, 1, 2])  # sort by horizon first (irrelevant), then by date (relevant for iloc!)
+
+horizon = 18
+ensembles = ensembles.loc[horizon]  # select horizon from data
+observations = observations.loc[
+    ensembles.index.get_level_values(0).unique()]  # only use the observations corresponding to the forecasts
+
+n_obs = len(observations)  # 577
+n_ens = ensembles.index.levshape[1]
+split = 0.90
+n_train_split = int(split * n_obs)  # number of dates
+train = pd.DataFrame(ensembles.iloc[:n_train_split * n_ens])  # split test and train data
+test = pd.DataFrame(ensembles.iloc[n_train_split * n_ens:])
+
+# Normalize Data
+scaler = StandardScaler()
+scaler.fit(train)
+train_norm = pd.DataFrame(data=scaler.transform(train), index=train.index, columns=train.columns)
+test_norm = pd.DataFrame(data=scaler.transform(test), index=test.index, columns=test.columns)
+observations_norm = pd.DataFrame(data=scaler.transform(observations), index=observations.index,
+                                 columns=observations.columns)
+
+# mean model as reference
+input = layers.Input(name="input", shape=n_ens)
+mean_model = Model(name="mean_model", inputs=input,
+                   outputs=layers.Lambda(name="mean_layer", function=(lambda ens: tf.reduce_mean(ens, axis=1)),
+                                         output_shape=1)(input))
+mean_model.trainable = False
+mean_model.compile(optimizer="adam", loss='mean_absolute_error')
+
+# And go
+models = []
+pred_vars = pred_vars.drop(["msl"])  # "msl" column false in data
+for var_name in pred_vars:
+    train = train_norm.reset_index().pivot(index="time", columns="number", values=var_name)
+    test = test_norm.reset_index().pivot(index="time", columns="number", values=var_name)
+
+    # main model
+    model: Model = get_aggregation_model(name=var_name + "_model", n_ens=n_ens, width=18,
+                                         activations=["relu", "relu"])
+    model.compile(optimizer='adam', loss='mean_absolute_error')
+    print("Training of ", model.name)
+    model.fit(y=observations_norm[var_name].iloc[:n_train_split], x=train, batch_size=40, epochs=50, verbose=False)
+    print("Evaluation of ", model.name)
+    model.evaluate(x=test, y=observations_norm[var_name].iloc[n_train_split:])
+    models.append(model)
+
+    # Mean Model as reference
+    print("Base Value:")
+    mean_model.evaluate(x=test, y=observations_norm[var_name].iloc[n_train_split:])
+    print()
+
+    plt.figure()
+    plt.plot(observations_norm[var_name].iloc[n_train_split:])
+    plt.plot(pd.DataFrame(data=model.predict(test), index=test.index))
+    plt.plot(pd.DataFrame(data=mean_model.predict(test), index=test.index))
+    plt.title(var_name)
+    plt.show()
 
 # Plan: Daten nach Train und Test splitten, Pipeline aufbauen, laufen lassen, Calibration anschauen
 # Loss: Nehme Verteilung für wind speed an und nehme CRPS dafür

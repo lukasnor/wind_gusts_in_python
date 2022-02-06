@@ -1,17 +1,18 @@
 # Imports
-import keras.losses
+import keras.optimizers
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import tensorflow as tf
-from keras import layers, Model, optimizers
 import tensorflow_probability as tfp
+from keras import layers, Model
 from keras.callbacks import EarlyStopping
-from pywatts.core.pipeline import Pipeline
-from pywatts.modules import SKLearnWrapper, KerasWrapper
 from sklearn.preprocessing import StandardScaler
+from keras.initializers import initializers_v2 as inits
+import seaborn as sns
 import matplotlib as mpl
-import matplotlib.pyplot as plt
-mpl.use('TkAgg')
+
+# mpl.use('TkAgg')
 
 #  Import standard logistic distribution for the custom loss
 tfd = tfp.distributions.Logistic(0, 1)
@@ -79,10 +80,16 @@ def get_benedikts_model(n_dir_preds, n_loc, emb_dim, lay1, actv):
 
 # A simple aggregation model to summarize ensemble member info wrt to one variable
 def get_aggregation_model(name: str, n_ens, width: int, activations):
+    initializer_dict = {"kernel_initializer": inits.GlorotNormal(seed=42),
+                        "bias_initializer": inits.Zeros,
+                        "kernel_regularizer": "l1"
+                        }
+    # initializer_dict = {"bias_initializer": inits.RandomNormal(mean=0.05, seed=42)}
+    initializer_dict = {}
     input = layers.Input(shape=n_ens, name="input")
-    hidden1 = layers.Dense(name="hidden1", units=width, activation=activations[0])(input)
-    hidden2 = layers.Dense(name="hidden2", units=width, activation=activations[1])(hidden1)
-    output = layers.Dense(units=1)(hidden2)
+    hidden1 = layers.Dense(name="hidden1", units=width, activation=activations[0], **initializer_dict)(input)
+    # hidden2 = layers.Dense(name="hidden2", units=width, activation=activations[1], **initializer_dict)(hidden1)
+    output = layers.Dense(units=1)(hidden1)
     model = Model(name=name, inputs=input, outputs=output)
     return model
 
@@ -91,7 +98,7 @@ def get_drn_model(names: [str], ):
     return None
 
 
-# Test code to see if model with custom loss works
+# Test code to see if benedikts model with custom loss works
 def try_out():
     # Import data
     train_data: pd.DataFrame = pd.read_csv("data/df_train.csv", index_col=0)
@@ -143,8 +150,6 @@ def try_out():
                         callbacks=EarlyStopping(patience=hpar_ls["n_patience"]))
 
 
-# Forecast from offshore_ensembles_horizon12 -> offshore_observations
-
 # Import data
 observations: pd.DataFrame = pd.read_csv("data/Offshore_Observations.csv", index_col=0)  # time is index
 observations.index = pd.to_datetime(observations.index)  # convert Index to DateTimeIndex
@@ -158,19 +163,26 @@ ensembles["time"] = pd.to_datetime(ensembles["time"], infer_datetime_format=True
 ensembles = ensembles.pivot(index=["horizon", "time", "number"], columns=[])  # create multiindex
 ensembles = ensembles[pred_vars]  # reduce columns to necessary ones
 ensembles = ensembles.sort_index(
-    level=[0, 1, 2])  # sort by horizon first (irrelevant), then by date (relevant for iloc!)
+    level=[0, 1, 2])  # sort by horizon first (somewhat irrelevant), then by date (relevant for iloc!)
 
 horizon = 18
 ensembles = ensembles.loc[horizon]  # select horizon from data
 observations = observations.loc[
     ensembles.index.get_level_values(0).unique()]  # only use the observations corresponding to the forecasts
 
-n_obs = len(observations)  # 577
+n_obs = len(observations)  # 577 for each horizon
 n_ens = ensembles.index.levshape[1]
-split = 0.90
+split = 0.85
 n_train_split = int(split * n_obs)  # number of dates
-train = pd.DataFrame(ensembles.iloc[:n_train_split * n_ens])  # split test and train data
-test = pd.DataFrame(ensembles.iloc[n_train_split * n_ens:])
+
+i_train = np.sort(np.random.choice(n_obs, size=n_train_split, replace=False))  # randomize the train and test set
+i_test = np.delete(np.array(range(n_obs)), i_train)
+# i_train = np.array(range(n_train_split))  # unrandomized train and test set
+# i_test = np.array(range(n_train_split, n_obs))
+dates_train = observations.index[i_train]
+dates_test = observations.index[i_test]
+train = pd.DataFrame(ensembles.loc[dates_train])
+test = pd.DataFrame(ensembles.loc[dates_test])
 
 # Normalize Data
 scaler = StandardScaler()
@@ -183,41 +195,86 @@ observations_norm = pd.DataFrame(data=scaler.transform(observations), index=obse
 # mean model as reference
 input = layers.Input(name="input", shape=n_ens)
 mean_model = Model(name="mean_model", inputs=input,
-                   outputs=layers.Lambda(name="mean_layer", function=(lambda ens: tf.reduce_mean(ens, axis=1)),
+                   outputs=layers.Lambda(name="mean_layer",
+                                         function=(lambda ens: tf.reduce_mean(ens, axis=1)),
                                          output_shape=1)(input))
 mean_model.trainable = False
 mean_model.compile(optimizer="adam", loss='mean_absolute_error')
 
 # And go
 models = []
-pred_vars = pred_vars.drop(["msl"])  # "msl" column false in data
+bar_data = []
+pred_vars = pred_vars.drop(["msl"])  # "msl" column messed up in data
+# pred_vars = ["d2m" for i in range(5)] + ["t2m" for i in range(5)]
+# pred_vars = ["speed"]
 for var_name in pred_vars:
     train = train_norm.reset_index().pivot(index="time", columns="number", values=var_name)
     test = test_norm.reset_index().pivot(index="time", columns="number", values=var_name)
 
     # main model
-    model: Model = get_aggregation_model(name=var_name + "_model", n_ens=n_ens, width=18,
-                                         activations=["relu", "relu"])
-    model.compile(optimizer='adam', loss='mean_absolute_error')
+    model: Model = get_aggregation_model(name=var_name + "_model", n_ens=n_ens, width=15,
+                                         activations=["selu", "selu"])
+    model.compile(optimizer=keras.optimizers.adam_v2.Adam(learning_rate=0.001),
+                  # optimizer="adam",
+                  loss='mean_absolute_error'
+                  )
     print("Training of ", model.name)
-    model.fit(y=observations_norm[var_name].iloc[:n_train_split], x=train, batch_size=40, epochs=50, verbose=False)
+    history = model.fit(y=observations_norm[var_name].iloc[i_train],
+                        x=train,
+                        batch_size=8,
+                        epochs=1000,
+                        verbose=1,
+                        validation_freq=1,
+                        validation_split=0.9,
+                        callbacks=[EarlyStopping(patience=60, restore_best_weights=True)],
+                        use_multiprocessing=True
+                        )
     print("Evaluation of ", model.name)
-    model.evaluate(x=test, y=observations_norm[var_name].iloc[n_train_split:])
+    evaluation = model.evaluate(x=test,
+                                y=observations_norm[var_name].iloc[i_test]
+                                )
     models.append(model)
+
+    plt.plot(history.history["loss"])
+    plt.plot(history.history["val_loss"])
+    plt.show()
 
     # Mean Model as reference
     print("Base Value:")
-    mean_model.evaluate(x=test, y=observations_norm[var_name].iloc[n_train_split:])
+    mean_evaluation = mean_model.evaluate(x=test,
+                                          y=observations_norm[var_name].iloc[i_test]
+                                          )
     print()
 
     plt.figure()
-    plt.plot(observations_norm[var_name].iloc[n_train_split:])
+    plt.plot(observations_norm[var_name].iloc[i_test])
     plt.plot(pd.DataFrame(data=model.predict(test), index=test.index))
     plt.plot(pd.DataFrame(data=mean_model.predict(test), index=test.index))
     plt.title(var_name)
     plt.show()
 
-# Plan: Daten nach Train und Test splitten, Pipeline aufbauen, laufen lassen, Calibration anschauen
-# Loss: Nehme Verteilung für wind speed an und nehme CRPS dafür
-# Netz: -Zuerst nur mit wind speed Werten aller Ensembles arbeiten
-#       -später mit allen Spalten arbeiten, dann diese vielleicht zuerst aggregieren?
+    bar_data.append([evaluation, mean_evaluation])
+
+# Generate bar plot
+bar_df = pd.DataFrame(data=np.array(bar_data), index=pred_vars, columns=["agg", "mean"])
+# set width of bar
+barWidth = 0.25
+fig = plt.subplots(figsize=(12, 8))
+
+# Set position of bar on X axis
+br1 = np.arange(len(bar_data))
+br2 = [x + barWidth for x in br1]
+
+# Make the plot
+plt.bar(br1, bar_df["agg"], color='r', width=barWidth,
+        edgecolor='grey', label='agg')
+plt.bar(br2, bar_df["mean"], color='g', width=barWidth,
+        edgecolor='grey', label='mean')
+
+# Adding Xticks
+plt.xlabel('Variable', fontweight='bold', fontsize=15)
+plt.ylabel('Evaluation', fontweight='bold', fontsize=15)
+plt.xticks([r + barWidth/2 for r in range(len(bar_df))],
+           pred_vars)
+plt.legend()
+plt.show()

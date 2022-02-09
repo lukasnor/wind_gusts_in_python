@@ -9,10 +9,9 @@ from keras import layers, Model
 from keras.callbacks import EarlyStopping
 from sklearn.preprocessing import StandardScaler
 from keras.initializers import initializers_v2 as inits
-import seaborn as sns
 import matplotlib as mpl
 
-# mpl.use('TkAgg')
+#mpl.use('TkAgg')
 
 #  Import standard logistic distribution for the custom loss
 tfd = tfp.distributions.Logistic(0, 1)
@@ -88,7 +87,7 @@ def get_aggregation_model(name: str, n_ens, width: int, activations):
     initializer_dict = {}
     input = layers.Input(shape=n_ens, name="input")
     hidden1 = layers.Dense(name="hidden1", units=width, activation=activations[0], **initializer_dict)(input)
-    # hidden2 = layers.Dense(name="hidden2", units=width, activation=activations[1], **initializer_dict)(hidden1)
+    #hidden2 = layers.Dense(name="hidden2", units=width, activation=activations[1], **initializer_dict)(hidden1)
     output = layers.Dense(units=1)(hidden1)
     model = Model(name=name, inputs=input, outputs=output)
     return model
@@ -165,7 +164,7 @@ ensembles = ensembles[pred_vars]  # reduce columns to necessary ones
 ensembles = ensembles.sort_index(
     level=[0, 1, 2])  # sort by horizon first (somewhat irrelevant), then by date (relevant for iloc!)
 
-horizon = 18
+horizon = 6
 ensembles = ensembles.loc[horizon]  # select horizon from data
 observations = observations.loc[
     ensembles.index.get_level_values(0).unique()]  # only use the observations corresponding to the forecasts
@@ -205,7 +204,7 @@ mean_model.compile(optimizer="adam", loss='mean_absolute_error')
 models = []
 bar_data = []
 pred_vars = pred_vars.drop(["msl"])  # "msl" column messed up in data
-# pred_vars = ["d2m" for i in range(5)] + ["t2m" for i in range(5)]
+#pred_vars = ["d2m" for _ in range(5)] #+ ["t2m" for _ in range(5)]
 # pred_vars = ["speed"]
 for var_name in pred_vars:
     train = train_norm.reset_index().pivot(index="time", columns="number", values=var_name)
@@ -221,12 +220,12 @@ for var_name in pred_vars:
     print("Training of ", model.name)
     history = model.fit(y=observations_norm[var_name].iloc[i_train],
                         x=train,
-                        batch_size=8,
-                        epochs=1000,
+                        batch_size=20,
+                        epochs=200,
                         verbose=1,
                         validation_freq=1,
-                        validation_split=0.9,
-                        callbacks=[EarlyStopping(patience=60, restore_best_weights=True)],
+                        validation_split=0.15,
+                        callbacks=[EarlyStopping(patience=50, restore_best_weights=True)],
                         use_multiprocessing=True
                         )
     print("Evaluation of ", model.name)
@@ -235,8 +234,18 @@ for var_name in pred_vars:
                                 )
     models.append(model)
 
+    plt.subplots(figsize=(12, 8))
     plt.plot(history.history["loss"])
     plt.plot(history.history["val_loss"])
+    plt.title("Learning curve of "+var_name, fontweight="bold", fontsize=18)
+    plt.show()
+
+    plt.subplots(figsize=(12, 8))
+    plt.plot(pd.DataFrame(data=model.predict(train), index=train.index), label="Model")
+    plt.plot(pd.DataFrame(data=mean_model(train), index=train.index), label="Mean")
+    plt.plot(observations_norm[var_name].iloc[i_train], label="Observation")
+    plt.legend()
+    plt.title("Train set of "+var_name, fontweight="bold", fontsize=18)
     plt.show()
 
     # Mean Model as reference
@@ -246,35 +255,35 @@ for var_name in pred_vars:
                                           )
     print()
 
-    plt.figure()
-    plt.plot(observations_norm[var_name].iloc[i_test])
-    plt.plot(pd.DataFrame(data=model.predict(test), index=test.index))
-    plt.plot(pd.DataFrame(data=mean_model.predict(test), index=test.index))
-    plt.title(var_name)
+    fig = plt.subplots(figsize=(12, 8))
+    plt.plot(pd.DataFrame(data=model.predict(test), index=test.index), label="Model")
+    plt.plot(pd.DataFrame(data=mean_model.predict(test), index=test.index), label="Mean")
+    plt.plot(observations_norm[var_name].iloc[i_test], label="Observation")
+    plt.title("Test set of "+var_name, fontweight="bold", fontsize=18)
+    plt.legend()
     plt.show()
 
     bar_data.append([evaluation, mean_evaluation])
+
 
 # Generate bar plot
 bar_df = pd.DataFrame(data=np.array(bar_data), index=pred_vars, columns=["agg", "mean"])
 # set width of bar
 barWidth = 0.25
 fig = plt.subplots(figsize=(12, 8))
-
 # Set position of bar on X axis
 br1 = np.arange(len(bar_data))
 br2 = [x + barWidth for x in br1]
-
 # Make the plot
 plt.bar(br1, bar_df["agg"], color='r', width=barWidth,
         edgecolor='grey', label='agg')
 plt.bar(br2, bar_df["mean"], color='g', width=barWidth,
         edgecolor='grey', label='mean')
-
 # Adding Xticks
 plt.xlabel('Variable', fontweight='bold', fontsize=15)
 plt.ylabel('Evaluation', fontweight='bold', fontsize=15)
 plt.xticks([r + barWidth/2 for r in range(len(bar_df))],
            pred_vars)
 plt.legend()
+plt.title("Loss Comparison", fontweight="bold", fontsize=18)
 plt.show()

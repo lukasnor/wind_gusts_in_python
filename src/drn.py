@@ -152,6 +152,7 @@ def try_out():
 # Import data
 observations: pd.DataFrame = pd.read_csv("data/Offshore_Observations.csv", index_col=0)  # time is index
 observations.index = pd.to_datetime(observations.index)  # convert Index to DateTimeIndex
+observations = observations.loc[observations["horizon"] != 24]
 pred_vars = observations.keys().drop(
     ["horizon", "is_origin"])  # Index(['u10', 'v10', 'd2m', 't2m', 'msl', 'sp', 'speed'])
 observations = observations[pred_vars]  # leave out "horizon" and "is_origin" from observations
@@ -163,22 +164,28 @@ ensembles = ensembles.pivot(index=["horizon", "time", "number"], columns=[])  # 
 ensembles = ensembles[pred_vars]  # reduce columns to necessary ones
 ensembles = ensembles.sort_index(
     level=[0, 1, 2])  # sort by horizon first (somewhat irrelevant), then by date (relevant for iloc!)
+ensembles = ensembles.loc[6:24]  # ignore instant forecasts
+ensembles = ensembles.reset_index().pivot(index=["time", "number"], columns=[])  # throw away horizon as index
+ensembles = ensembles[pred_vars]
+ensembles = ensembles.sort_index(level=0)
+ensembles = ensembles.iloc[0:len(ensembles)-50]  # remove forecast for september 1, since no observation available
 
-horizon = 6
-ensembles = ensembles.loc[horizon]  # select horizon from data
+#horizon = 6
+#ensembles = ensembles.loc[horizon]  # select horizon from data
 observations = observations.loc[
     ensembles.index.get_level_values(0).unique()]  # only use the observations corresponding to the forecasts
 
 n_obs = len(observations)  # 577 for each horizon
 n_ens = ensembles.index.levshape[1]
 split = 0.85
-n_train_split = int(split * n_obs)  # number of dates
+n_train_split = int(split * n_obs)  # number of dates on which to train
 
 i_train = np.sort(np.random.choice(n_obs, size=n_train_split, replace=False))  # randomize the train and test set
 i_test = np.delete(np.array(range(n_obs)), i_train)
 # i_train = np.array(range(n_train_split))  # unrandomized train and test set
 # i_test = np.array(range(n_train_split, n_obs))
 dates_train = observations.index[i_train]
+print(dates_train)
 dates_test = observations.index[i_test]
 train = pd.DataFrame(ensembles.loc[dates_train])
 test = pd.DataFrame(ensembles.loc[dates_test])

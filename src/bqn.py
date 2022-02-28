@@ -4,7 +4,11 @@ from keras.callbacks import EarlyStopping
 from scipy.special import binom
 from keras import Model, layers
 import tensorflow as tf
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, MinMaxScaler
+import matplotlib.pyplot as plt
+
+fontdict_title = {"fontweight": "bold", "fontsize": 18}
+fontdict_axis = {"fontweight": "bold", "fontsize": 15}
 
 
 # Construction of the local model
@@ -51,7 +55,7 @@ def get_model(name: str, n_ens_input: int, layer_sizes: [int], activations,
 
 
 # Construction of the loss function
-degree = 6
+degree = 8
 loss_quantile_levels = np.arange(0.01, 1, 0.01)  # 1% to 99% quantile levels for the loss, equidistant
 lql = tf.constant(loss_quantile_levels, dtype="float32")
 bernsteins = np.array(
@@ -60,14 +64,44 @@ bernsteins = np.array(
 B = tf.constant(bernsteins, dtype="float32")
 
 
-# Multi-quantile loss: sum over all quantile losses for levels in lql
+# Multi-quantile loss: mean over all quantile losses for levels in lql
 def quantile_loss(y_true, y_pred):
     quantiles = tf.transpose(tf.tensordot(B, tf.cumsum(y_pred, axis=1), axes=[[1], [1]]))
-    error = tf.expand_dims(y_true, axis=1) - quantiles
+    error = y_true - quantiles  # no expand dims
     err1 = error * tf.expand_dims(lql - 1, 0)
     err2 = error * tf.expand_dims(lql, 0)
     loss = tf.maximum(err1, err2)
-    return tf.reduce_mean(loss, axis=1)
+    return tf.reduce_sum(loss, axis=1)
+
+
+def get_quantiles(y_pred: pd.DataFrame) -> pd.DataFrame:
+    return pd.DataFrame(np.transpose(np.tensordot(bernsteins, np.cumsum(y_pred, axis=1), axes=[[1], [1]])),
+                        index=y_pred.index)
+
+
+def get_rank(obs: pd.DataFrame, quantiles: pd.DataFrame) -> pd.DataFrame:
+    return pd.concat([obs, quantiles], axis=1).rank(axis=1).iloc[:, 0]
+
+
+def generate_pit_plot(obs, quantiles) -> None:
+    ranks = get_rank(obs, quantiles)
+    plt.hist(ranks, density=True, bins=len(loss_quantile_levels)+1)
+    plt.title("Rank Histogram", fontdict=fontdict_title)
+    plt.show()
+
+
+def generate_forecast_plots(y_true: pd.DataFrame, y_pred: pd.DataFrame, n=None) -> None:
+    q = get_quantiles(y_pred)
+    if n == None:
+        n = y_true.shape[0]
+    for i in range(n):
+        plt.plot(xmin=0, xmax=1)
+        plt.plot(q.iloc[(i, slice(None))], loss_quantile_levels, color="blue", label="forecast")
+        plt.vlines(y_true.iloc[i], ymin=loss_quantile_levels.min(), ymax=loss_quantile_levels.max(),
+                   label="observation", color="red")
+        plt.title("Forecast " + str(i), fontdict=fontdict_title)
+        plt.legend()
+        plt.show()
 
 
 # Import observation data
@@ -85,7 +119,7 @@ ensembles = ensembles[variables]
 n_ens = len(ensembles.index.get_level_values(1).unique())
 
 # Split train and test set
-train_split = 0.85
+train_split = 0.8
 dates = observations.index.intersection(ensembles.index.get_level_values(0).unique())
 n_train = int(len(dates) * train_split)
 dates_train = dates[:n_train]
@@ -96,13 +130,13 @@ obs_train = observations.loc[dates_train]
 obs_test = observations.loc[dates_test]
 
 # Scale ensembles
-ens_scaler = StandardScaler()
+ens_scaler = MinMaxScaler()
 ens_scaler.fit(ens_train)
 sc_ens_train = pd.DataFrame(data=ens_scaler.transform(ens_train), index=ens_train.index, columns=ens_train.columns)
 sc_ens_test = pd.DataFrame(data=ens_scaler.transform(ens_test), index=ens_test.index, columns=ens_test.columns)
 
 # Scale observations
-obs_scaler = StandardScaler()
+obs_scaler = MinMaxScaler()  # MinMaxScaler more suitable for power data. But even better when not aggregated
 obs_scaler.fit(obs_train)
 sc_obs_train = pd.DataFrame(data=obs_scaler.transform(obs_train), index=obs_train.index, columns=obs_train.columns)
 sc_obs_test = pd.DataFrame(data=obs_scaler.transform(obs_test), index=obs_test.index, columns=obs_test.columns)
@@ -116,11 +150,14 @@ sc_ens_train = sc_ens_train["speed"].reset_index().pivot(index="time", columns="
 history = model.fit(y=sc_obs_train,
                     x=sc_ens_train,
                     batch_size=20,
-                    epochs=10,
+                    epochs=500,
                     verbose=1,
                     validation_freq=1,
                     validation_split=0.10,
-                    #callbacks=[EarlyStopping(patience=50, restore_best_weights=True)],
+                    callbacks=[EarlyStopping(patience=20, restore_best_weights=True)],
                     use_multiprocessing=True
                     )
-
+sc_ens_test = sc_ens_test["speed"].reset_index().pivot(index="time", columns="number")
+test = pd.DataFrame(model.predict(sc_ens_test), index=sc_ens_test.index)
+generate_forecast_plots(sc_obs_test, test, 10)
+generate_pit_plot(sc_obs_test, get_quantiles(test))

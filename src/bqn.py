@@ -55,7 +55,7 @@ def get_model(name: str, n_ens_input: int, layer_sizes: [int], activations,
 
 
 # Construction of the loss function
-degree = 8
+degree = 7
 loss_quantile_levels = np.arange(0.01, 1, 0.01)  # 1% to 99% quantile levels for the loss, equidistant
 lql = tf.constant(loss_quantile_levels, dtype="float32")
 bernsteins = np.array(
@@ -83,22 +83,23 @@ def get_rank(obs: pd.DataFrame, quantiles: pd.DataFrame) -> pd.DataFrame:
     return pd.concat([obs, quantiles], axis=1).rank(axis=1).iloc[:, 0]
 
 
-def generate_pit_plot(obs, quantiles) -> None:
+def generate_pit_plot(obs, quantiles, name, n_bins=len(loss_quantile_levels) + 1) -> None:
     ranks = get_rank(obs, quantiles)
-    plt.hist(ranks, density=True, bins=len(loss_quantile_levels)+1)
-    plt.title("Rank Histogram", fontdict=fontdict_title)
+    plt.hist(ranks, bins=n_bins)
+    plt.hlines(len(ranks) / n_bins, linestyles="dashed", color="black", xmin=0, xmax=100)
+    plt.title("Rank Histogram - " + name, fontdict=fontdict_title)
     plt.show()
 
 
 def generate_forecast_plots(y_true: pd.DataFrame, y_pred: pd.DataFrame, n=None) -> None:
     q = get_quantiles(y_pred)
-    if n == None:
+    if n is None:
         n = y_true.shape[0]
     for i in range(n):
-        plt.plot(xmin=0, xmax=1)
         plt.plot(q.iloc[(i, slice(None))], loss_quantile_levels, color="blue", label="forecast")
         plt.vlines(y_true.iloc[i], ymin=loss_quantile_levels.min(), ymax=loss_quantile_levels.max(),
-                   label="observation", color="red")
+                   label="observation", color="red", linestyles="dashed")
+        plt.xlim(left=0.0, right=max(1.0, plt.axis()[1]))
         plt.title("Forecast " + str(i), fontdict=fontdict_title)
         plt.legend()
         plt.show()
@@ -119,18 +120,21 @@ ensembles = ensembles[variables]
 n_ens = len(ensembles.index.get_level_values(1).unique())
 
 # Split train and test set
-train_split = 0.8
+train_split = 0.85
 dates = observations.index.intersection(ensembles.index.get_level_values(0).unique())
+n_obs = len(dates)
 n_train = int(len(dates) * train_split)
-dates_train = dates[:n_train]
-dates_test = dates[n_train:]
+i_train = np.sort(np.random.choice(n_obs, size=n_train, replace=False))  # randomize the train and test set
+i_test = np.delete(np.array(range(n_obs)), i_train)
+dates_train = dates[i_train]
+dates_test = dates[i_test]
 ens_train = ensembles.loc[(dates_train, slice(None))]
 ens_test = ensembles.loc[(dates_test, slice(None))]
 obs_train = observations.loc[dates_train]
 obs_test = observations.loc[dates_test]
 
 # Scale ensembles
-ens_scaler = MinMaxScaler()
+ens_scaler = MinMaxScaler()  # Best would be to use an appropriate scaler for each column seperately
 ens_scaler.fit(ens_train)
 sc_ens_train = pd.DataFrame(data=ens_scaler.transform(ens_train), index=ens_train.index, columns=ens_train.columns)
 sc_ens_test = pd.DataFrame(data=ens_scaler.transform(ens_test), index=ens_test.index, columns=ens_test.columns)
@@ -141,23 +145,37 @@ obs_scaler.fit(obs_train)
 sc_obs_train = pd.DataFrame(data=obs_scaler.transform(obs_train), index=obs_train.index, columns=obs_train.columns)
 sc_obs_test = pd.DataFrame(data=obs_scaler.transform(obs_test), index=obs_test.index, columns=obs_test.columns)
 
+# Reformat data
+variables = ["speed", "sp", "t2m"]
+sc_ens_train = sc_ens_train[variables].reset_index().pivot(index="time", columns="number")
+sc_ens_test = sc_ens_test[variables].reset_index().pivot(index="time", columns="number")
+
 # Compile model
-model = get_model(name="first_try", n_ens_input=n_ens, layer_sizes=[48, 24],
+model = get_model(name="first_try", n_ens_input=n_ens * len(variables), layer_sizes=[32, 16],
                   activations=["selu", "selu"], degree=degree)
 model.compile(optimizer="adam", loss=quantile_loss)
 
-sc_ens_train = sc_ens_train["speed"].reset_index().pivot(index="time", columns="number")
+# Fit model
 history = model.fit(y=sc_obs_train,
                     x=sc_ens_train,
-                    batch_size=20,
+                    batch_size=16,
                     epochs=500,
                     verbose=1,
                     validation_freq=1,
-                    validation_split=0.10,
-                    callbacks=[EarlyStopping(patience=20, restore_best_weights=True)],
+                    validation_split=0.20,
+                    callbacks=[EarlyStopping(patience=30, restore_best_weights=True)],
                     use_multiprocessing=True
                     )
-sc_ens_test = sc_ens_test["speed"].reset_index().pivot(index="time", columns="number")
+
+plt.plot(history.history["loss"], label="loss")
+plt.plot(history.history["val_loss"], label="val_loss")
+plt.xlabel("Epochs", fontdict=fontdict_axis)
+plt.title("Training", fontdict=fontdict_title)
+plt.show()
+
+# Evaluate model
+train = pd.DataFrame(model.predict(sc_ens_train), index=sc_ens_train.index)
+generate_pit_plot(sc_obs_train, get_quantiles(train), "Training set")
 test = pd.DataFrame(model.predict(sc_ens_test), index=sc_ens_test.index)
-generate_forecast_plots(sc_obs_test, test, 10)
-generate_pit_plot(sc_obs_test, get_quantiles(test))
+generate_forecast_plots(sc_obs_test, test, n=20)
+generate_pit_plot(sc_obs_test, get_quantiles(test), "Test set")

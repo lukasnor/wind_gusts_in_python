@@ -83,7 +83,8 @@ def get_rank(obs: pd.DataFrame, quantiles: pd.DataFrame) -> pd.DataFrame:
     return pd.concat([obs, quantiles], axis=1).rank(axis=1).iloc[:, 0]
 
 
-def generate_pit_plot(obs, quantiles, name, n_bins=len(loss_quantile_levels) + 1) -> None:
+def generate_pit_plot(obs: pd.DataFrame, quantiles: pd.DataFrame, name: str,
+                      n_bins: int = len(loss_quantile_levels) + 1) -> None:
     ranks = get_rank(obs, quantiles)
     plt.hist(ranks, bins=n_bins)
     plt.hlines(len(ranks) / n_bins, linestyles="dashed", color="black", xmin=0, xmax=100)
@@ -105,6 +106,10 @@ def generate_forecast_plots(y_true: pd.DataFrame, y_pred: pd.DataFrame, n=None) 
         plt.show()
 
 
+# Define forecast horizons
+horizons = [3, 6, 9, 12, 15, 18, 21, 24]
+horizon = horizons[0]
+
 # Import observation data
 observations = pd.read_csv("../data/Sweden_Zone3_Power.csv", index_col=0)
 observations.index = pd.to_datetime(observations.index, infer_datetime_format=True)
@@ -113,10 +118,12 @@ observations = observations[observations.columns.drop("horizon")]
 # Import ensemble data
 ensembles = pd.read_csv("../data/Sweden_Zone3_Ensembles.csv")
 ensembles["time"] = pd.to_datetime(ensembles["time"], infer_datetime_format=True)
-ensembles = ensembles.reset_index().pivot(index=["time", "number"], columns=[])
-ensembles = ensembles.sort_index(level=[0, 1])
-variables = ensembles.columns.drop(["is_origin", "horizon", "index"])
+ensembles = ensembles.reset_index().pivot(index=["horizon", "time", "number"], columns=[])
+variables = ensembles.columns.drop(["is_origin", "index"])
 ensembles = ensembles[variables]
+ensembles = ensembles.sort_index(level=[0, 1, 2])
+ensembles = ensembles.loc[(horizon, slice(None), slice(None))]
+ensembles.index = ensembles.index.droplevel(0)
 n_ens = len(ensembles.index.get_level_values(1).unique())
 
 # Split train and test set
@@ -170,12 +177,12 @@ history = model.fit(y=sc_obs_train,
 plt.plot(history.history["loss"], label="loss")
 plt.plot(history.history["val_loss"], label="val_loss")
 plt.xlabel("Epochs", fontdict=fontdict_axis)
-plt.title("Training", fontdict=fontdict_title)
+plt.title("Training Plot - Horizon " + str(horizon), fontdict=fontdict_title)
 plt.show()
 
 # Evaluate model
 train = pd.DataFrame(model.predict(sc_ens_train), index=sc_ens_train.index)
-generate_pit_plot(sc_obs_train, get_quantiles(train), "Training set")
+generate_pit_plot(sc_obs_train, get_quantiles(train), "Training set - Horizon " + str(horizon))
 test = pd.DataFrame(model.predict(sc_ens_test), index=sc_ens_test.index)
 generate_forecast_plots(sc_obs_test, test, n=20)
-generate_pit_plot(sc_obs_test, get_quantiles(test), "Test set")
+generate_pit_plot(sc_obs_test, get_quantiles(test), "Test set - Horizon " + str(horizon))

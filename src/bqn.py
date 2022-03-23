@@ -197,21 +197,36 @@ sc_obs_test = pd.DataFrame(data=obs_scaler.transform(obs_test), index=obs_test.i
 
 # Reformat data depending on level of aggregation
 if h_pars["aggregation"] == "mean":  # mean the ensembles for each feature
-    sc_ens_train_f = sc_ens_train.groupby(level=0).mean()
-    sc_ens_test_f = sc_ens_test.groupby(level=0).mean()
+    sc_ens_train_f = sc_ens_train.groupby(level=0).agg(["mean", "std"])
+    sc_ens_test_f = sc_ens_test.groupby(level=0).agg(["mean", "std"])
     sc_obs_train_f = sc_obs_train
     sc_obs_test_f = sc_obs_test
-if h_pars["aggregation"] == "single":  # use every ensemble member individually instead of mean of them -> more data
+if h_pars["aggregation"] == "single":
     sc_ens_train_f = sc_ens_train
     sc_ens_test_f = sc_ens_test
+    # expand the index of sc_obs_train and _test and copy values relating to existing index levels
     sc_obs_train_f = pd.DataFrame(index=sc_ens_train.index, columns=sc_obs_train.columns)
     sc_obs_train_f["wind_power"] = pd.Series(sc_obs_train_f.index.get_level_values(0)).map(
         sc_obs_train["wind_power"]).values
     sc_obs_test_f = pd.DataFrame(index=sc_ens_test.index, columns=sc_obs_test.columns)
     sc_obs_test_f["wind_power"] = pd.Series(sc_obs_test_f.index.get_level_values(0)).map(
         sc_obs_test["wind_power"]).values
-if h_pars["aggregation"] in ["mean", "single"]:  # If not all ensemble members are used, pass through variance by hand
-    None  # TODO: Add variances to data
+if h_pars["aggregation"] == "single+std":  # use every ensemble member individually instead of mean of them -> more data
+    # why does pandas not support addition of another level in a multiindex while copying values relating to the existing levels?
+    sc_ens_train_f = sc_ens_train.join(sc_ens_train.index.get_level_values(0).map(
+        sc_ens_train.groupby(level=0).std().to_dict("index")).to_frame().set_index(sc_ens_train.index).apply(
+        func=lambda d: d[0].values(), axis=1, result_type="expand").set_axis(labels=sc_ens_train.columns, axis=1),
+                                       rsuffix="_std")
+    sc_ens_test_f = sc_ens_test.join(sc_ens_test.index.get_level_values(0).map(
+        sc_ens_test.groupby(level=0).std().to_dict("index")).to_frame().set_index(sc_ens_test.index).apply(
+        func=lambda d: d[0].values(), axis=1, result_type="expand").set_axis(labels=sc_ens_test.columns, axis=1),
+                                     rsuffix="_std")
+    sc_obs_train_f = pd.DataFrame(index=sc_ens_train.index, columns=sc_obs_train.columns)
+    sc_obs_train_f["wind_power"] = pd.Series(sc_obs_train_f.index.get_level_values(0)).map(
+        sc_obs_train["wind_power"]).values
+    sc_obs_test_f = pd.DataFrame(index=sc_ens_test.index, columns=sc_obs_test.columns)
+    sc_obs_test_f["wind_power"] = pd.Series(sc_obs_test_f.index.get_level_values(0)).map(
+        sc_obs_test["wind_power"]).values
 if h_pars["aggregation"] == "all":  # give it all the info of the ensemble
     sc_ens_train_f = sc_ens_train[variables].reset_index().pivot(index="time", columns="number")
     sc_ens_test_f = sc_ens_test[variables].reset_index().pivot(index="time", columns="number")

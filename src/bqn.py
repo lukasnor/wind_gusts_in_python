@@ -7,6 +7,7 @@ import tensorflow as tf
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 import matplotlib.pyplot as plt
 
+# For plot formatting
 fontdict_title = {"fontweight": "bold", "fontsize": 18}
 fontdict_axis = {"fontweight": "bold", "fontsize": 15}
 
@@ -47,14 +48,37 @@ def get_model(name: str, n_input: int, layer_sizes: [int], activations: [str],
         x = layers.Dense(units=layer_sizes[i + 1], activation=activations[i + 1], name="hidden" + str(i + 1))(x)
 
     # Output
-    output = layers.Dense(units=degree + 1, activation="softplus")(x)  # smooth, non-negative and proportional
+    output = layers.Dense(name="output", units=degree + 1, activation="softplus")(
+        x)  # smooth, non-negative and proportional
 
     # Model
     return Model(name=name, inputs=ens_input, outputs=output)
 
 
+# Use average_models instead! As get_model, but averaged over #trials
+def get_averaged_model(name: str, n_input: int, layer_sizes: [int], activations: [str],
+                       degree: int, trials: int) -> Model:
+    common_input = layers.Input(name="common_input", shape=n_input)
+    quantile_loss = build_quantile_loss(degree)
+    models = [get_model("submodel" + str(i), n_input, layer_sizes, activations, degree) for i
+              in range(trials)]
+    for model in models:
+        model.compile(loss=quantile_loss, optimizer="adam")
+    print(models)
+    print(models[0].summary())
+    avg_output = layers.Average(name="average")([model(common_input) for model in models])
+    return Model(name=name, inputs=common_input, outputs=avg_output)
+
+
+# For a list of models of same type, construct the average model
+def average_models(models: [Model]) -> Model:
+    common_input = layers.Input(name="common_input", shape=models[0].input.shape[1])
+    average_output = layers.Average(name="average")([model(common_input) for model in models])
+    return Model(name="average_model", inputs=common_input, outputs=average_output)
+
+
 # Construction of the loss function
-def build_quantile_loss(degree: int):
+def build_quantile_loss(degree: int):  # -> Loss function
     loss_quantile_levels = np.arange(0.01, 1, 0.01)
     lql = tf.constant(loss_quantile_levels, dtype="float32")  # 1% to 99% quantile levels for the loss, equidistant
     B = tf.constant(np.array(
@@ -184,12 +208,13 @@ def preprocess_data(h_pars: dict):
     # Return the processed data
     return (sc_ens_train, sc_ens_test, sc_obs_train, sc_obs_test)
 
-if __name__=="main":
+
+if __name__ == "__main__":
     # Get the data in a processed form
     h_pars = {"horizon": 6,  #
               "variables": None,
 
-              "aggregation": "single",
+              "aggregation": "single+std",
               "degree": 10,
               "layer_sizes": [16, 20, 16],
               "activations": None,
@@ -222,8 +247,10 @@ if __name__=="main":
         sc_obs_test_f = pd.DataFrame(index=sc_ens_test.index, columns=sc_obs_test.columns)
         sc_obs_test_f["wind_power"] = pd.Series(sc_obs_test_f.index.get_level_values(0)).map(
             sc_obs_test["wind_power"]).values
-    if h_pars["aggregation"] == "single+std":  # use every ensemble member individually instead of mean of them -> more data
-        # why does pandas not support addition of another level in a multiindex while copying values relating to the existing levels?
+    if h_pars["aggregation"] == "single+std":
+        # use every ensemble member individually instead of mean of them -> more data
+        # why does pandas not support addition of another level in a multiindex while copying values relating to the
+        # existing levels?
         sc_ens_train_f = sc_ens_train.join(sc_ens_train.index.get_level_values(0).map(
             sc_ens_train.groupby(level=0).std().to_dict("index")).to_frame().set_index(sc_ens_train.index).apply(
             func=lambda d: d[0].values(), axis=1, result_type="expand").set_axis(labels=sc_ens_train.columns, axis=1),
@@ -246,11 +273,9 @@ if __name__=="main":
 
     # Average over models
     models = []
-    trains = []
-    tests = []
-    for i in range(3):
+    for i in range(10):
         # Compile model
-        model = get_model(name="Nouny"+str(i), n_input=len(sc_ens_train_f.columns), layer_sizes=h_pars["layer_sizes"],
+        model = get_model(name="Nouny" + str(i), n_input=len(sc_ens_train_f.columns), layer_sizes=h_pars["layer_sizes"],
                           activations=h_pars["activations"], degree=h_pars["degree"])
         model.compile(optimizer="adam", loss=build_quantile_loss(h_pars["degree"]))
 
@@ -282,8 +307,11 @@ if __name__=="main":
         generate_pit_plot(sc_obs_test_f, get_quantiles(test, np.arange(0.01, 1, 0.01)),
                           model.name + "Test set - Horizon " + str(h_pars["horizon"]), n_bins=50)
         models.append(model)
-        trains.append(train)
-        tests.append(test)
 
-    avg_train = pd.concat(trains, axis=1).groupby(axis=1, level=0).mean()
-    avg_test = pd.concat(tests, axis=1).groupby(axis=1, level=0).mean()
+    # Averaging the models
+    for model in models:
+        model.trainable = False
+    average_model = average_models(models)
+    average_model.compile(loss=build_quantile_loss(h_pars["degree"]), optimizer="adam")
+    average_model.summary()
+    average_model.evaluate(x=sc_ens_test_f, y=sc_obs_test_f)

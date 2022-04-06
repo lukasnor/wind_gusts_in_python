@@ -1,11 +1,11 @@
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import tensorflow as tf
+from keras import Model, layers
 from keras.callbacks import EarlyStopping
 from scipy.special import binom
-from keras import Model, layers
-import tensorflow as tf
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
-import matplotlib.pyplot as plt
 
 # For plot formatting
 fontdict_title = {"fontweight": "bold", "fontsize": 18}
@@ -13,10 +13,10 @@ fontdict_axis = {"fontweight": "bold", "fontsize": 15}
 
 
 # Construction of the local model
-def get_local_model(name: str, n_input: int, n_loc: int, n_emb: int, layer_sizes: [int], activations: [str],
+def get_local_model(name: str, input_size: int, n_loc: int, n_emb: int, layer_sizes: [int], activations: [str],
                     degree: int) -> Model:
     # Inputs
-    ens_input = layers.Input(shape=n_input, name="ens_input")
+    ens_input = layers.Input(shape=input_size, name="ens_input")
     emb_input = layers.Input(shape=1, name="emb_input")
 
     # Embedding
@@ -37,10 +37,10 @@ def get_local_model(name: str, n_input: int, n_loc: int, n_emb: int, layer_sizes
 
 
 # Construction of model
-def get_model(name: str, n_input: int, layer_sizes: [int], activations: [str],
+def get_model(name: str, input_size: int, layer_sizes: [int], activations: [str],
               degree: int) -> Model:
     # Inputs
-    ens_input = layers.Input(shape=n_input, name="ens_input")
+    ens_input = layers.Input(shape=input_size, name="ens_input")
 
     # Hidden layers
     x = layers.Dense(units=layer_sizes[0], activation=activations[0], name="hidden0")(ens_input)
@@ -156,7 +156,7 @@ def generate_forecast_plots(y_true: pd.DataFrame, y_pred: pd.DataFrame, quantile
 
 
 def preprocess_data(h_pars: dict):
-    # h_pars must contain keys "horizon", "variables"
+    # h_pars must contain keys "horizon", "variables", "train_split"
 
     # Import observation data
     observations = pd.read_csv("../data/Sweden_Zone3_Power.csv", index_col=0)
@@ -175,11 +175,10 @@ def preprocess_data(h_pars: dict):
     ensembles.index = ensembles.index.droplevel(0)
     n_ens = len(ensembles.index.get_level_values(1).unique())
 
-    # Split train and test set
-    train_split = 0.85
+    # Split train and test set according to h_pars["train_split"]
     dates = observations.index.intersection(ensembles.index.get_level_values(0).unique())
     n_obs = len(dates)
-    n_train = int(len(dates) * train_split)
+    n_train = int(len(dates) * h_pars["train_split"])
     # i_train = np.sort(np.random.choice(n_obs, size=n_train, replace=False))  # randomize the train and test set, not nice
     # i_test = np.delete(np.array(range(n_obs)), i_train)
     i_train = np.arange(0, n_train)
@@ -206,38 +205,17 @@ def preprocess_data(h_pars: dict):
     sc_obs_test = pd.DataFrame(data=obs_scaler.transform(obs_test), index=obs_test.index, columns=obs_test.columns)
 
     # Return the processed data
-    return (sc_ens_train, sc_ens_test, sc_obs_train, sc_obs_test)
+    return sc_ens_train, sc_ens_test, sc_obs_train, sc_obs_test
 
 
-if __name__ == "__main__":
-    # Get the data in a processed form
-    h_pars = {"horizon": 6,  #
-              "variables": None,
-
-              "aggregation": "single+std",
-              "degree": 10,
-              "layer_sizes": [16, 20, 16],
-              "activations": None,
-
-              "batch_size": 100,
-              "patience": 20,
-              }
-    # Default value for activation is "selu" if activations do not match layer_sizes
-    if h_pars["activations"] is None or \
-            not len(h_pars["activations"]) == len(h_pars["layer_sizes"]):
-        h_pars["activations"] = ["selu" for i in range(len(h_pars["layer_sizes"]))]
-    # Default value for variables is 'using all variables'
-    if h_pars["variables"] is None:
-        h_pars["variables"] = ["u100", "v100", "t2m", "sp", "speed"]
-    sc_ens_train, sc_ens_test, sc_obs_train, sc_obs_test = preprocess_data(h_pars=h_pars)
-
-    # Reformat data depending on level of aggregation
+# Reformat data depending on level of aggregation in h_pars["aggregation"]
+def format_data(h_pars: dict, sc_ens_train, sc_ens_test, sc_obs_train, sc_obs_test):
     if h_pars["aggregation"] == "mean":  # mean the ensembles for each feature
         sc_ens_train_f = sc_ens_train.groupby(level=0).agg(["mean", "std"])
         sc_ens_test_f = sc_ens_test.groupby(level=0).agg(["mean", "std"])
         sc_obs_train_f = sc_obs_train
         sc_obs_test_f = sc_obs_test
-    if h_pars["aggregation"] == "single":
+    elif h_pars["aggregation"] == "single":
         sc_ens_train_f = sc_ens_train
         sc_ens_test_f = sc_ens_test
         # expand the index of sc_obs_train and _test and copy values relating to existing index levels
@@ -247,7 +225,7 @@ if __name__ == "__main__":
         sc_obs_test_f = pd.DataFrame(index=sc_ens_test.index, columns=sc_obs_test.columns)
         sc_obs_test_f["wind_power"] = pd.Series(sc_obs_test_f.index.get_level_values(0)).map(
             sc_obs_test["wind_power"]).values
-    if h_pars["aggregation"] == "single+std":
+    elif h_pars["aggregation"] == "single+std":
         # use every ensemble member individually instead of mean of them -> more data
         # why does pandas not support addition of another level in a multiindex while copying values relating to the
         # existing levels?
@@ -265,17 +243,50 @@ if __name__ == "__main__":
         sc_obs_test_f = pd.DataFrame(index=sc_ens_test.index, columns=sc_obs_test.columns)
         sc_obs_test_f["wind_power"] = pd.Series(sc_obs_test_f.index.get_level_values(0)).map(
             sc_obs_test["wind_power"]).values
-    if h_pars["aggregation"] == "all":  # give it all the info of the ensemble
+    elif h_pars["aggregation"] == "all":  # give it all the info of the ensemble
         sc_ens_train_f = sc_ens_train[h_pars["variables"]].reset_index().pivot(index="time", columns="number")
         sc_ens_test_f = sc_ens_test[h_pars["variables"]].reset_index().pivot(index="time", columns="number")
         sc_obs_train_f = sc_obs_train
         sc_obs_test_f = sc_obs_test
+    else:
+        raise Exception("Wrong aggregation method specified!")
+    return sc_ens_train_f, sc_ens_test_f, sc_obs_train_f, sc_obs_test_f
+
+
+if __name__ == "__main__":
+    # Get the data in a processed form
+    h_pars = {"horizon": 6,  #
+              "variables": None,
+              "train_split": 0.85,
+
+              "aggregation": "single+std",
+              "degree": 16,
+              "layer_sizes": [16, 16, 20],
+              "activations": ["selu", "selu", "selu"],
+
+              "batch_size": 100,
+              "patience": 50,
+              }
+    # Default value for activation is "selu" if activations do not match layer_sizes
+    if h_pars["activations"] is None or \
+            not len(h_pars["activations"]) == len(h_pars["layer_sizes"]):
+        h_pars["activations"] = ["selu" for i in range(len(h_pars["layer_sizes"]))]
+    # Default value for variables is 'using all variables'
+    if h_pars["variables"] is None:
+        h_pars["variables"] = ["u100", "v100", "t2m", "sp", "speed"]
+
+    # Import the data
+    sc_ens_train, sc_ens_test, sc_obs_train, sc_obs_test = preprocess_data(h_pars=h_pars)
+
+    # Format the data
+    sc_ens_train_f, sc_ens_test_f, sc_obs_train_f, sc_obs_test_f = format_data(h_pars, sc_ens_train, sc_ens_test,
+                                                                               sc_obs_train, sc_obs_test)
 
     # Average over models
     models = []
-    for i in range(10):
+    for i in range(1):
         # Compile model
-        model = get_model(name="Nouny" + str(i), n_input=len(sc_ens_train_f.columns), layer_sizes=h_pars["layer_sizes"],
+        model = get_model(name="Nouny" + str(i), input_size=len(sc_ens_train_f.columns), layer_sizes=h_pars["layer_sizes"],
                           activations=h_pars["activations"], degree=h_pars["degree"])
         model.compile(optimizer="adam", loss=build_quantile_loss(h_pars["degree"]))
 
@@ -286,8 +297,10 @@ if __name__ == "__main__":
                             epochs=500,
                             verbose=1,
                             validation_freq=1,
-                            validation_split=0.20,
-                            callbacks=[EarlyStopping(patience=h_pars["patience"], restore_best_weights=True)],
+                            validation_split=0.1,
+                            callbacks=[EarlyStopping(patience=h_pars["patience"]
+                                                     # , restore_best_weights=True
+                                                     )],
                             use_multiprocessing=True
                             )
         # Plot the learning curves
@@ -295,7 +308,8 @@ if __name__ == "__main__":
         plt.plot(history.history["val_loss"], label="val_loss")
         plt.legend()
         plt.xlabel("Epochs", fontdict=fontdict_axis)
-        plt.title(model.name + "Training Plot - Horizon " + str(h_pars["horizon"]), fontdict=fontdict_title)
+        plt.title(model.name + " Run " + str(i) + " - Training Plot - Horizon " + str(h_pars["horizon"]),
+                  fontdict=fontdict_title)
         plt.show()
 
         # Evaluate model

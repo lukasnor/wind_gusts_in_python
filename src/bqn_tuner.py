@@ -41,39 +41,29 @@ for horizon in horizons:
         def model_builder(hp):
             hp_horizon = hp.Fixed(name="horizon", value=horizon)
             hp_aggregation = hp.Fixed(name="aggregation", value=aggregation)
-
-            # TODO: Batch sizes cannot be tuned
-            # hp_batch_size = None
-            # if hp_aggregation == "all" or hp_aggregation == "mean":
-            #     hp_batch_size = hp.Int(name="batch_size", min_value=8, max_value=256, sampling="log", step=8,
-            #                            parent_name="aggregation",
-            #                            parent_values=["all", "mean"])
-            # elif hp_aggregation == "single" or hp_aggregation == "single+std":
-            #     hp_batch_size = hp.Int(name="batch_size", min_value=50, max_value=1000, sampling="log", step=50,
-            #                            parent_name="aggregation",
-            #                            parent_values=["single", "single+std"])
-
             hp_input_size = hp.Fixed(name="input_size", value=len(sc_ens_train_f.columns))
 
-            hp_depth = hp.Int(name="depth", min_value=1, max_value=3)
-            # TODO: What should the layer_sizes be?
-            hp_layer_sizes = None
-            if hp_aggregation == "all":
-                hp_layer_sizes = hp.Choice(name="layer_sizes", values=["foo"])
-            if hp_aggregation == "single" or hp_aggregation == "mean":
-                hp_layer_sizes = hp.Choice(name="layer_sizes", values=["foo"])
-            if hp_aggregation == "single+std":
-                hp_layer_sizes = hp.Choice(name="layer_sizes", values=["foo"])
-            # Dummy layer_sizes, all layers same size
-            hp_layer_sizes = [
-                hp.Int(name="layer" + str(i) + "_size", min_value=math.ceil(hp_input_size / 4),
-                       max_value=hp_input_size * 4,
-                       step=math.ceil(hp_input_size / 16)) for i in range(hp_depth)]
-            hp_learning_rate = hp.Choice(name="learning_rate", values=[1e-2, 1e-3, 1e-4])
             hp_degree = hp.Int(name="degree", min_value=4, max_value=20)
+            hp_depth = hp.Int(name="depth", min_value=1, max_value=5)
+
+            min_value = max(math.ceil(hp_input_size / 4), hp_degree)
+            hp_layer0_size = hp.Int(name="layer0_size", min_value=min_value, max_value=hp_input_size * 4,
+                                    step=math.ceil(hp_input_size/2))
+            hp_layer1_size = hp.Int(name="layer1_size", min_value=min_value, max_value=hp_layer0_size,
+                                    parent_name="depth", parent_values=[i for i in range(2, hp_depth + 1)])
+            hp_layer2_size = hp.Int(name="layer2_size", min_value=min_value, max_value=hp_layer1_size,
+                                    parent_name="depth", parent_values=[i for i in range(3, hp_depth + 1)])
+            hp_layer3_size = hp.Int(name="layer3_size", min_value=min_value, max_value=hp_layer2_size,
+                                    parent_name="depth", parent_values=[i for i in range(4, hp_depth + 1)])
+            hp_layer4_size = hp.Int(name="layer4_size", min_value=min_value, max_value=hp_layer3_size,
+                                    parent_name="depth", parent_values=[i for i in range(5, hp_depth + 1)])
+            hp_layer_sizes = [hp_layer0_size, hp_layer1_size, hp_layer2_size, hp_layer3_size, hp_layer4_size][:hp_depth]
+
+            hp_learning_rate = hp.Choice(name="learning_rate", values=[1e-2, 1e-3, 1e-4])
+
             hp_activation = hp.Choice(name="activation", values=["relu", "selu"])
-            hp_activations = [hp.Fixed(name="activations", value=hp_activation) for _ in range(hp_depth)]
-            print("input_size: " + str(hp_input_size), "depth: " + str(hp_depth), "layer_sizes: " + str(hp_layer_sizes),
+            hp_activations = [hp_activation for _ in range(hp_depth)]
+            print("degree: "+str(hp_degree), "depth: " + str(hp_depth), "layer_sizes: " + str(hp_layer_sizes),
                   "activations: " + str(hp_activations), sep="\n")
             model = get_model(name="foo", input_size=hp_input_size, layer_sizes=hp_layer_sizes,
                               activations=hp_activations, degree=hp_degree)
@@ -87,7 +77,7 @@ for horizon in horizons:
                           factor=3,
                           directory='../results/tuning',
                           project_name="horizon:" + str(horizon) + "_agg:" + str(aggregation))
-        stop_early = EarlyStopping(monitor='val_loss', patience=20)
+        stop_early = EarlyStopping(monitor='val_loss', patience=5)
 
         # Run the search
         tuner.search(sc_ens_train_f, sc_obs_train_f, epochs=150, validation_split=0.2, callbacks=[stop_early])

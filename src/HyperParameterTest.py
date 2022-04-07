@@ -1,4 +1,4 @@
-from kerastuner import HyperParameters
+from keras_tuner import HyperParameters
 
 hp = HyperParameters()
 max_depth = 5

@@ -3,7 +3,7 @@ from itertools import product, chain, combinations
 
 import keras.optimizer_v2.adam
 from keras.callbacks import EarlyStopping
-from kerastuner import Hyperband
+from keras_tuner import Hyperband
 
 from bqn import preprocess_data, format_data, build_quantile_loss, get_model, average_models
 
@@ -43,21 +43,21 @@ for horizon in horizons:
             hp.Fixed(name="aggregation", value=aggregation)
             hp_input_size = hp.Fixed(name="input_size", value=len(sc_ens_train_f.columns))
 
-            hp_degree = hp.Int(name="degree", min_value=4, max_value=20)
+            hp_degree = hp.Int(name="degree", min_value=4, max_value=25)
 
             max_depth = 5
-            min_layer_size = max(int(hp_input_size / 4), hp.get("degree"))
+            min_layer_size = max(int(hp_input_size / 4), 10)
+            max_layer_size = hp_input_size * 4
             layer_step = max(int((hp_input_size / 2)), 1)
-            hp_depth = hp.Int(name="depth", min_value=1, max_value=max_depth)
-            for i in range(hp_depth):
-                if i == 0:
-                    hp.Int(name="layer0_size", min_value=min_layer_size, max_value=hp_input_size * 4,
-                           step=layer_step)
-                else:
-                    hp.Int(name="layer" + str(i) + "_size", min_value=min_layer_size,
-                           max_value=hp.get("layer" + str(i - 1) + "_size"), step=layer_step,
-                           parent_name="depth", parent_values=[*range(i + 1, max_depth + 1)])
-            hp_layer_sizes = [hp.get("layer" + str(i) + "_size") for i in range(hp_depth)]
+            hp_depth = hp.Int(name="depth", min_value=1, max_value=max_depth, default=max_depth)
+
+            hp_layer_sizes = [
+                hp.Int(name="layer" + str(i) + "_size", min_value=min_layer_size, max_value=max_layer_size,
+                       step=layer_step, parent_name="depth", parent_values=[*range(i + 1, max_depth + 1)]) for i in
+                range(max_depth)]
+            for _ in range(hp_layer_sizes.count(None)):
+                hp_layer_sizes.remove(None)
+            hp_layer_sizes.sort(reverse=True)
 
             hp_learning_rate = hp.Choice(name="learning_rate", values=[1e-2, 1e-3, 1e-4])
 

@@ -1,11 +1,11 @@
-import math
-from difflib import restore
+import json
+from itertools import product, chain, combinations
 
 import keras.optimizer_v2.adam
 from keras.callbacks import EarlyStopping
-from bqn import preprocess_data, format_data, build_quantile_loss, get_model
-from itertools import product, chain, combinations
 from kerastuner import Hyperband
+
+from bqn import preprocess_data, format_data, build_quantile_loss, get_model, average_models
 
 
 # Returns all sublists of list
@@ -73,34 +73,55 @@ for horizon in horizons:
 
         tuner = Hyperband(model_builder,
                           objective='val_loss',
-                          max_epochs=81,
+                          max_epochs=10,
                           factor=3,
                           directory='../results/tuning',
                           project_name="horizon:" + str(horizon) + "_agg:" + str(aggregation))
-        stop_early = EarlyStopping(monitor='val_loss', patience=10)
+        stop_early = EarlyStopping(monitor='val_loss', patience=27, restore_best_weights=True)
 
         # Run the search
         tuner.search(sc_ens_train_f, sc_obs_train_f, epochs=150, validation_split=0.2, callbacks=[stop_early],
                      use_multiprocessing=True, workers=3)
 
-        # Get the optimal hyperparameters
-        best_hps = tuner.get_best_hyperparameters(num_trials=1)[0]
+        # Get the three optimal hyperparameter sets, and compare them
+        best_hps_candidates = tuner.get_best_hyperparameters(num_trials=3)
+        best_model_candidates = []
+        # For each set of hps, average model over 3 runs
+        for hp in best_hps_candidates:
 
-        # Build the model with the optimal hyperparameters and train it on the data for 200 epochs
-        # TODO: Is that the sensible thing to do, if training runs differ alot? Maybe average over multiple runs later
-        model = tuner.hypermodel.build(best_hps)
-        history = model.fit(sc_ens_train_f, sc_obs_train_f, epochs=200, validation_split=0.2,
-                            callbacks=[EarlyStopping(patience=50, restore_best_weights=True)])
+            models = [get_model(name="testname",
+                                input_size=hp["input_size"],
+                                layer_sizes=[hp["layer" + str(i) + "_size"] for i in range(hp["depth"])],
+                                activations=[hp["activation"] for _ in range(hp["depth"])],
+                                degree=hp["degree"])
+                      for _ in range(3)]
+            for model in models:
+                model.compile(optimizer=keras.optimizer_v2.adam.Adam(hp["learning_rate"]),
+                              loss=build_quantile_loss(hp["degree"]))
+                model.fit(x=sc_ens_train_f,
+                          y=sc_obs_train_f,
+                          batch_size=25,
+                          epochs=500,
+                          verbose=1,
+                          validation_freq=1,
+                          validation_split=0.1,
+                          callbacks=[stop_early],
+                          use_multiprocessing=True,
+                          workers=3
+                          )
+            avg_model = average_models(models)
+            avg_model.compile(optimizer=keras.optimizer_v2.adam.Adam(hp["learning_rate"]),
+                              loss=build_quantile_loss(hp["degree"]))
+            best_model_candidates.append(avg_model)
+        # Evaluate the hp sets
+        evaluations = map(lambda m: m.evaluate(x=sc_ens_test_f, y=sc_obs_test_f), best_model_candidates)
+        # .. and find the best hps
+        best_index = evaluations.index(min(evaluations))
+        best_hps = best_hps_candidates[best_index]
 
-        # Figure out best epoch
-        val_loss_per_epoch = history.history['val_loss']
-        best_epoch = val_loss_per_epoch.index(max(val_loss_per_epoch)) + 1
-        print('Best epoch: %d' % (best_epoch,))
-
-        # Retrain the model
-        hypermodel = tuner.hypermodel.build(best_hps)
-        hypermodel.fit(sc_ens_train_f, sc_obs_train_f, epochs=best_epoch, validation_split=0.2)
-
-        # Evaluate the model
-        eval_result = hypermodel.evaluate(sc_ens_test_f, sc_obs_test_f)
-        print("test loss:", eval_result)
+        print(best_hps)
+        print(evaluations[best_index])
+        # Save the best hps
+        with open("../results/trial/" + "horizon:" + str(horizon) + "_agg:" + str(
+                aggregation) + "/best_hps.json", "w") as file:
+            json.dump(best_hps, file, indent=2)

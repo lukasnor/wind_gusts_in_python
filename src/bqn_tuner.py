@@ -39,32 +39,32 @@ for horizon in horizons:
 
 
         def model_builder(hp):
-            hp_horizon = hp.Fixed(name="horizon", value=horizon)
-            hp_aggregation = hp.Fixed(name="aggregation", value=aggregation)
+            hp.Fixed(name="horizon", value=horizon)
+            hp.Fixed(name="aggregation", value=aggregation)
             hp_input_size = hp.Fixed(name="input_size", value=len(sc_ens_train_f.columns))
 
             hp_degree = hp.Int(name="degree", min_value=4, max_value=20)
-            hp_depth = hp.Int(name="depth", min_value=1, max_value=5)
 
-            min_value = max(math.ceil(hp_input_size / 4), hp_degree)
-            hp_layer0_size = hp.Int(name="layer0_size", min_value=min_value, max_value=hp_input_size * 4,
-                                    step=math.ceil(hp_input_size/2))
-            hp_layer1_size = hp.Int(name="layer1_size", min_value=min_value, max_value=hp_layer0_size,
-                                    parent_name="depth", parent_values=[i for i in range(2, hp_depth + 1)])
-            hp_layer2_size = hp.Int(name="layer2_size", min_value=min_value, max_value=hp_layer1_size,
-                                    parent_name="depth", parent_values=[i for i in range(3, hp_depth + 1)])
-            hp_layer3_size = hp.Int(name="layer3_size", min_value=min_value, max_value=hp_layer2_size,
-                                    parent_name="depth", parent_values=[i for i in range(4, hp_depth + 1)])
-            hp_layer4_size = hp.Int(name="layer4_size", min_value=min_value, max_value=hp_layer3_size,
-                                    parent_name="depth", parent_values=[i for i in range(5, hp_depth + 1)])
-            hp_layer_sizes = [hp_layer0_size, hp_layer1_size, hp_layer2_size, hp_layer3_size, hp_layer4_size][:hp_depth]
+            max_depth = 5
+            min_layer_size = max(int(hp_input_size / 4), hp.get("degree"))
+            layer_step = max(int((hp_input_size / 2)), 1)
+            hp_depth = hp.Int(name="depth", min_value=1, max_value=max_depth)
+            for i in range(hp_depth):
+                if i == 0:
+                    hp.Int(name="layer0_size", min_value=min_layer_size, max_value=hp_input_size * 4,
+                           step=layer_step)
+                else:
+                    hp.Int(name="layer" + str(i) + "_size", min_value=min_layer_size,
+                           max_value=hp.get("layer" + str(i - 1) + "_size"), step=layer_step,
+                           parent_name="depth", parent_values=[*range(i + 1, max_depth + 1)])
+            hp_layer_sizes = [hp.get("layer" + str(i) + "_size") for i in range(hp_depth)]
 
             hp_learning_rate = hp.Choice(name="learning_rate", values=[1e-2, 1e-3, 1e-4])
 
             hp_activation = hp.Choice(name="activation", values=["relu", "selu"])
             hp_activations = [hp_activation for _ in range(hp_depth)]
-            print("degree: "+str(hp_degree), "depth: " + str(hp_depth), "layer_sizes: " + str(hp_layer_sizes),
-                  "activations: " + str(hp_activations), sep="\n")
+            print("degree: " + str(hp_degree), "depth: " + str(hp_depth), "layer_sizes: " + str(hp_layer_sizes),
+                  "activation: " + str(hp_activation), sep="\n")
             model = get_model(name="foo", input_size=hp_input_size, layer_sizes=hp_layer_sizes,
                               activations=hp_activations, degree=hp_degree)
             model.compile(loss=build_quantile_loss(hp_degree), optimizer=keras.optimizer_v2.adam.Adam(hp_learning_rate))
@@ -73,14 +73,15 @@ for horizon in horizons:
 
         tuner = Hyperband(model_builder,
                           objective='val_loss',
-                          max_epochs=10,
+                          max_epochs=81,
                           factor=3,
                           directory='../results/tuning',
                           project_name="horizon:" + str(horizon) + "_agg:" + str(aggregation))
-        stop_early = EarlyStopping(monitor='val_loss', patience=5)
+        stop_early = EarlyStopping(monitor='val_loss', patience=10)
 
         # Run the search
-        tuner.search(sc_ens_train_f, sc_obs_train_f, epochs=150, validation_split=0.2, callbacks=[stop_early])
+        tuner.search(sc_ens_train_f, sc_obs_train_f, epochs=150, validation_split=0.2, callbacks=[stop_early],
+                     use_multiprocessing=True, workers=3)
 
         # Get the optimal hyperparameters
         best_hps = tuner.get_best_hyperparameters(num_trials=1)[0]

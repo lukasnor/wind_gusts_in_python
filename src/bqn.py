@@ -172,7 +172,7 @@ def preprocess_data(h_pars: dict):
     # Select only relevant horizon
     ensembles = ensembles.sort_index(level=[0, 1, 2])
     ensembles = ensembles.loc[(h_pars["horizon"], slice(None), slice(None))]
-    ensembles.index = ensembles.index.droplevel(0)
+    #ensembles.index = ensembles.index.droplevel(0)
     n_ens = len(ensembles.index.get_level_values(1).unique())
 
     # Split train and test set according to h_pars["train_split"]

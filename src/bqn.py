@@ -276,9 +276,9 @@ def preprocess_data(h_pars: dict):
                                 columns=obs_train.columns)
     sc_obs_test = pd.DataFrame(data=obs_scaler.transform(obs_test), index=obs_test.index,
                                columns=obs_test.columns)
-
+    scale_dict["obs"] = obs_scaler # return the scale_dict to unscale for the crps
     # Return the processed data
-    return sc_ens_train, sc_ens_test, sc_obs_train, sc_obs_test
+    return sc_ens_train, sc_ens_test, sc_obs_train, sc_obs_test, scale_dict
 
 
 # Reformat data depending on level of aggregation in h_pars["aggregation"]
@@ -355,8 +355,11 @@ if __name__ == "__main__":
         h_pars["variables"] = ["u100", "v100", "t2m", "sp", "speed"]
 
     # Import the data
-    sc_ens_train, sc_ens_test, sc_obs_train, sc_obs_test = preprocess_data(h_pars=h_pars)
-
+    sc_ens_train, sc_ens_test, sc_obs_train, sc_obs_test, scale_dict\
+        = preprocess_data(h_pars=h_pars)
+    obs_scaler = scale_dict["obs"]
+    obs_max = obs_scaler.data_max_
+    obs_min = obs_scaler.data_min_
     # Format the data
     sc_ens_train_f, sc_ens_test_f, sc_obs_train_f, sc_obs_test_f = format_data(h_pars,
                                                                                sc_ens_train,
@@ -366,7 +369,7 @@ if __name__ == "__main__":
 
     # Average over models
     models = []
-    for i in range(1):
+    for i in range(0):
         # Compile model
         model = get_model(name="Nouny" + str(i),
                           input_size=len(sc_ens_train_f.columns),
@@ -375,7 +378,8 @@ if __name__ == "__main__":
                           degree=h_pars["degree"])
         model.compile(optimizer="adam",
                       loss=build_custom_loss(h_pars["degree"]),
-                      metrics=[build_crps_loss(h_pars["degree"],scale=sc_obs_train.max())])
+                      metrics=[build_crps_loss(h_pars["degree"],
+                                               scale=obs_max -obs_min)])
 
         # Fit model
         history = model.fit(y=sc_obs_train_f,

@@ -1,4 +1,4 @@
-from bqn import build_crps_loss
+from bqn import build_crps_loss, build_crps_loss3
 import tensorflow as tf
 import numpy as np
 import properscoring as ps
@@ -14,12 +14,12 @@ def get_quantiles(y_pred, quantile_levels):
 degree = 12
 y_pred = tf.constant([7,6,5,4,3,2,1,0.1,0.1,0.5,0.6,4,7], dtype="float", shape=(1,13))
 y_true = tf.constant([13.4], dtype="float", shape=(1,1))
-crps = build_crps_loss(degree=degree)
-print(crps(y_true, y_pred))
-qs = np.random.random(100)
-print(qs)
+#crps = build_crps_loss(degree=degree)
+crps3 =build_crps_loss3(degree=degree)
+#print(crps(y_true, y_pred))
+print(crps3(y_true, y_pred))
+qs = np.random.random(1000)
 quantiles = get_quantiles(y_pred, qs)
-print(quantiles)
-print(ps.crps_ensemble(y_true, quantiles))
+print(ps.crps_ensemble(y_true[0,0], quantiles[0]))
 
 

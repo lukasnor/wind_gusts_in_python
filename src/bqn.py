@@ -114,13 +114,13 @@ def build_crps_loss(degree: int, scale=1.0):
     B = tf.constant(np.array(
         [binom(degree, j) * np.power(lql, j) * np.power(1 - lql, degree - j) for j in
          range(degree + 1)]).transpose(), dtype="float32")
-    # Derivative of the Bernstein polynomials, B'_0 and B'_degree must be considered seperately
+    # Derivative of the Bernstein polynomials, B'_0 and B'_degree must be considered separately
     B_prime = tf.transpose(tf.constant(np.array(
         [-degree * np.power(1 - lql, degree - 1)]  # B'_0
         + [binom(degree, j) * np.power(lql, j - 1) * np.power(1 - lql, degree - j - 1)
-           * (j - degree * lql) # B'_j
+           * (j - degree * lql)  # B'_j
            for j in range(1, degree)]
-        + [degree * np.power(lql, degree - 1)] # B'_degree
+        + [degree * np.power(lql, degree - 1)]  # B'_degree
     ), dtype="float32"))
 
     def crps(y_true, y_pred):
@@ -130,6 +130,58 @@ def build_crps_loss(degree: int, scale=1.0):
         square = tf.square(lql - tf.experimental.numpy.heaviside(error, 1))
         integrand = tf.multiply(square, q_prime)
         return y_true * scale * tf.reduce_mean(integrand, axis=1)
+
+    return crps
+
+
+def build_crps_loss2(degree: int, min=0.0, max=1.0, eps=0.0):
+    lql = tf.constant(np.arange(0.0, 1.01, 0.01),
+                      dtype="float32")  # 1% to 99% quantile levels for the loss, equidistant
+    # Bernstein polynomials to interpolate the CDF
+    B = tf.constant(np.array(
+        [binom(degree, j) * np.power(lql, j) * np.power(1 - lql, degree - j) for j in
+         range(degree + 1)]).transpose(), dtype="float32")
+    B_prime = tf.transpose(tf.constant(np.array(
+        [-degree * np.power(1 - lql, degree - 1)]  # B'_0
+        + [binom(degree, j) * np.power(lql, j - 1) * np.power(1 - lql, degree - j - 1)
+           * (j - degree * lql)  # B'_j
+           for j in range(1, degree)]
+        + [degree * np.power(lql, degree - 1)]  # B'_degree
+    ), dtype="float32"))
+
+    def crps(y_true, y_pred):
+        q = tf.transpose(tf.tensordot(B, tf.cumsum(y_pred, axis=1), axes=[[1], [1]]))
+        q_prime = tf.transpose(tf.tensordot(B_prime, tf.cumsum(y_pred, axis=1), axes=[[1], [1]]))
+        error = q - y_true  # no expand dims
+        square = tf.square(error)
+        integrand = tf.multiply(square, tf.pow(tf.abs(q_prime) + eps, -0.75))
+        return (max - min) * tf.reduce_mean(integrand, axis=1)
+
+    return crps
+
+
+def build_crps_loss3(degree: int, min=0.0, max=1.0):
+    # random quantile levels
+    lql = tf.constant(np.random.random(100000))
+    # Bernstein polynomials to interpolate the CDF
+    B = tf.constant(np.array(
+        [binom(degree, j) * np.power(lql, j) * np.power(1 - lql, degree - j) for j in
+         range(degree + 1)]).transpose(), dtype="float32")
+    lql2 = tf.constant(np.random.random(100000), dtype="float32")
+    B2 = tf.constant(np.array(
+        [binom(degree, j) * np.power(lql2, j) * np.power(1 - lql2, degree - j) for j in
+         range(degree + 1)]).transpose(), dtype="float32")
+
+    def crps(y_true, y_pred):
+        # X
+        q = tf.transpose(tf.tensordot(B, tf.cumsum(y_pred, axis=1), axes=[[1], [1]]))
+        # X*
+        q2 = tf.transpose(tf.tensordot(B2, tf.cumsum(y_pred, axis=1), axes=[[1], [1]]))
+        # |X-x|
+        error = (max - min) * tf.abs(q - y_true)
+        # |X-X*|
+        error2 = (max - min) * tf.abs(q - q2)
+        return tf.reduce_mean(error, axis=1) - 0.5 * tf.reduce_mean(error2, axis=1)
 
     return crps
 
@@ -276,7 +328,7 @@ def preprocess_data(h_pars: dict):
                                 columns=obs_train.columns)
     sc_obs_test = pd.DataFrame(data=obs_scaler.transform(obs_test), index=obs_test.index,
                                columns=obs_test.columns)
-    scale_dict["obs"] = obs_scaler # return the scale_dict to unscale for the crps
+    scale_dict["obs"] = obs_scaler  # return the scale_dict to unscale for the crps
     # Return the processed data
     return sc_ens_train, sc_ens_test, sc_obs_train, sc_obs_test, scale_dict
 
@@ -339,7 +391,7 @@ if __name__ == "__main__":
               "train_split": 0.85,
 
               "aggregation": "single+std",
-              "degree": 14,
+              "degree": 12,
               "layer_sizes": [16, 16],
               "activations": ["selu", "selu"],
 
@@ -355,7 +407,7 @@ if __name__ == "__main__":
         h_pars["variables"] = ["u100", "v100", "t2m", "sp", "speed"]
 
     # Import the data
-    sc_ens_train, sc_ens_test, sc_obs_train, sc_obs_test, scale_dict\
+    sc_ens_train, sc_ens_test, sc_obs_train, sc_obs_test, scale_dict \
         = preprocess_data(h_pars=h_pars)
     obs_scaler = scale_dict["obs"]
     obs_max = obs_scaler.data_max_
@@ -369,23 +421,26 @@ if __name__ == "__main__":
 
     # Average over models
     models = []
-    for i in range(0):
+    for i in range(2):
         # Compile model
         model = get_model(name="Nouny" + str(i),
                           input_size=len(sc_ens_train_f.columns),
                           layer_sizes=h_pars["layer_sizes"],
                           activations=h_pars["activations"],
                           degree=h_pars["degree"])
+        # model.compile(optimizer="adam",
+        #               loss=build_custom_loss(h_pars["degree"]),
+        #               metrics=[build_crps_loss(h_pars["degree"],
+        #                                        scale=obs_max -obs_min)])
         model.compile(optimizer="adam",
-                      loss=build_custom_loss(h_pars["degree"]),
-                      metrics=[build_crps_loss(h_pars["degree"],
-                                               scale=obs_max -obs_min)])
-
+                      loss=build_crps_loss3(h_pars["degree"], obs_min, obs_max),
+                      metrics=[build_quantile_loss(h_pars["degree"])]
+                      )
         # Fit model
         history = model.fit(y=sc_obs_train_f,
                             x=sc_ens_train_f,
                             batch_size=h_pars["batch_size"],
-                            epochs=100,
+                            epochs=50,
                             verbose=1,
                             validation_freq=1,
                             validation_split=0.1,
@@ -397,7 +452,7 @@ if __name__ == "__main__":
         # Plot the learning curves
         plt.plot(history.history["loss"], label="loss")
         plt.plot(history.history["val_loss"], label="val_loss")
-        plt.plot(history.history["val_crps"], label="val_crps")
+        # plt.plot(history.history["val_crps"], label="val_crps")
         plt.legend()
         plt.xlabel("Epochs", fontdict=fontdict_axis)
         plt.title(
@@ -424,6 +479,6 @@ if __name__ == "__main__":
     for model in models:
         model.trainable = False
     average_model = average_models(models)
-    average_model.compile(loss=build_crps_loss(h_pars["degree"]), optimizer="adam")
+    average_model.compile(loss=build_crps_loss3(h_pars["degree"], obs_min, obs_max), optimizer="adam")
     average_model.summary()
     average_model.evaluate(x=sc_ens_test_f, y=sc_obs_test_f)

@@ -134,20 +134,9 @@ def evaluate_best_hps():
 
                 # Evaluation
                 model.compile(optimizer="adam",
-                              loss=build_crps_loss(fixed_params["degree"],
-                                                   scale=obs_max - obs_min))
-                # evaluation.loc[index, "run" + str(i + 1)] \
-                #     = model.evaluate(x=sc_ens_test_f, y=sc_obs_test_f)
-                test = pd.DataFrame(model.predict(sc_ens_test_f), index=sc_ens_test_f.index)
-                quantiles = get_quantiles(test, np.arange(0.0, 1.01, 0.01))
-                ensembles = (obs_max - obs_min) * quantiles + obs_min
-                obs_test = ((obs_max - obs_min) * sc_obs_test_f + obs_min).values
-                crps = ps.crps_ensemble(obs_test.squeeze(), ensembles.values).mean()
-                # print(crps)
-                # print(tf.reduce_mean(build_crps_loss(fixed_params["degree"], 3*(obs_max-obs_min))\
-                # (sc_obs_test_f.values, test.values)))
-                # print(tf.reduce_mean(build_crps_loss(fixed_params["degree"], 2)(obs_test, test)))
-                evaluation.loc[index, "run" + str(i + 1)] = crps
+                              loss=build_crps_loss(fixed_params["degree"], obs_min, obs_max))
+                evaluation.loc[index, "run" + str(i + 1)] \
+                    = model.evaluate(x=sc_ens_test_f, y=sc_obs_test_f)
                 print(evaluation)
                 models.append(model)
 
@@ -155,14 +144,8 @@ def evaluate_best_hps():
             average_model.compile(loss=build_crps_loss(fixed_params["degree"],
                                                        scale=obs_max - obs_min)
                                   )
-            # evaluation.loc[index, "average"] = average_model.evaluate(x=sc_ens_test_f,
-            #                                                           y=sc_obs_test_f)
-            test = pd.DataFrame(average_model.predict(sc_ens_test_f), index=sc_ens_test_f.index)
-            quantiles = get_quantiles(test, np.arange(0.0, 1.01, 0.01))
-            ensembles = (obs_max - obs_min) * quantiles + obs_min
-            obs_test = ((obs_max - obs_min) * sc_obs_test_f + obs_min).values
-            crps = ps.crps_ensemble(obs_test.squeeze(), ensembles.values).mean()
-            evaluation.loc[index, "average"] = crps
+            evaluation.loc[index, "average"] = average_model.evaluate(x=sc_ens_test_f,
+                                                                      y=sc_obs_test_f)
             print(evaluation)
 
     evaluation.to_csv("../results/evaluation.csv")

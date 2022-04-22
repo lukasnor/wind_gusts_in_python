@@ -79,10 +79,10 @@ def average_models(models: [Model]) -> Model:
 
 # Construction of the loss function
 def build_quantile_loss(degree: int):  # -> Loss function
-    loss_quantile_levels = np.arange(0.01, 1, 0.01)
-    lql = tf.constant(loss_quantile_levels, dtype="float32")  # 1% to 99% quantile levels for the loss, equidistant
+    lql = tf.constant(np.arange(0.0, 1.01, 0.01),
+                      dtype="float32")  # 1% to 99% quantile levels for the loss, equidistant
     B = tf.constant(np.array(
-        [binom(degree, j) * np.power(loss_quantile_levels, j) * np.power(1 - loss_quantile_levels, degree - j) for j in
+        [binom(degree, j) * np.power(lql, j) * np.power(1 - lql, degree - j) for j in
          range(degree + 1)]).transpose(), dtype="float32")  # Bernstein polynomials to interpolate the CDF
 
     # Multi-quantile loss: sum over all quantile losses for levels in lql
@@ -96,6 +96,54 @@ def build_quantile_loss(degree: int):  # -> Loss function
 
     return quantile_loss
 
+
+# WARNING: DO NOT USE FOR TRAINING!
+# Not numerically stable under constant forecasts, for evaluation only
+# CRPS loss implementation for Bernstein Quantile Networks
+def build_crps_loss(degree: int):
+    lql = tf.constant(np.arange(0.0, 1.01, 0.01),
+                      dtype="float32")  # 1% to 99% quantile levels for the loss, equidistant
+    B = tf.constant(np.array(
+        [binom(degree, j) * np.power(lql, j) * np.power(1 - lql, degree - j) for j in
+         range(degree + 1)]).transpose(), dtype="float32")  # Bernstein polynomials to interpolate the CDF
+    B_prime = tf.transpose(tf.constant(np.array([-degree * np.power(1 - lql, degree - 1)] + [
+        binom(degree, j) * np.power(lql, j - 1) * np.power(1 - lql, degree - j - 1) * (j - degree * lql) for j in
+        range(1, degree)] + [degree * np.power(lql, degree - 1)]), dtype="float32"))
+
+    def crps(y_true, y_pred):
+        q = tf.transpose(tf.tensordot(B, tf.cumsum(y_pred, axis=1), axes=[[1], [1]]))
+        q_prime = tf.transpose(tf.tensordot(B_prime, tf.cumsum(y_pred, axis=1), axes=[[1], [1]]))
+        error = q - y_true  # no expand dims
+        square = tf.square(lql - tf.experimental.numpy.heaviside(error, 1))
+        integrand = tf.multiply(square, q_prime)
+        return y_true*(2280)*tf.reduce_mean(integrand, axis=1)
+
+    return crps
+
+
+def build_custom_loss(degree: int):
+    lql = tf.constant(np.arange(0.0, 1.01, 0.01),
+                      dtype="float32")  # 1% to 99% quantile levels for the loss, equidistant
+    B = tf.constant(np.array(
+        [binom(degree, j) * np.power(lql, j) * np.power(1 - lql, degree - j) for j in
+         range(degree + 1)]).transpose(), dtype="float32")  # Bernstein polynomials to interpolate the CDF
+    B_prime = tf.transpose(tf.constant(np.array([-degree * np.power(1 - lql, degree - 1)] + [
+        binom(degree, j) * np.power(lql, j - 1) * np.power(1 - lql, degree - j - 1) * (j - degree * lql) for j in
+        range(1, degree)] + [degree * np.power(lql, degree - 1)]), dtype="float32"))
+
+    def custom_loss(y_true, y_pred):
+        quantiles = tf.transpose(tf.tensordot(B, tf.cumsum(y_pred, axis=1), axes=[[1], [1]]))
+        error = y_true - quantiles  # no expand dims
+        err1 = error * tf.expand_dims(lql - 1, 0)
+        err2 = error * tf.expand_dims(lql, 0)
+        loss = tf.maximum(err1, err2)
+        q_prime = tf.transpose(tf.tensordot(B_prime, tf.cumsum(y_pred, axis=1), axes=[[1], [1]]))
+        error = quantiles - y_true  # no expand dims
+        square = tf.square(lql - tf.experimental.numpy.heaviside(error, 1))
+        integrand = tf.multiply(square, q_prime)
+        return tf.reduce_mean(integrand, axis=1) + tf.reduce_sum(loss, axis=1)
+    
+    return custom_loss
 
 # Methods for scaling features individually
 # Fit the scalers
@@ -172,7 +220,7 @@ def preprocess_data(h_pars: dict):
     # Select only relevant horizon
     ensembles = ensembles.sort_index(level=[0, 1, 2])
     ensembles = ensembles.loc[(h_pars["horizon"], slice(None), slice(None))]
-    #ensembles.index = ensembles.index.droplevel(0)
+    ensembles.index = ensembles.index.droplevel(0)
     n_ens = len(ensembles.index.get_level_values(1).unique())
 
     # Split train and test set according to h_pars["train_split"]
@@ -260,12 +308,12 @@ if __name__ == "__main__":
               "train_split": 0.85,
 
               "aggregation": "single+std",
-              "degree": 16,
-              "layer_sizes": [16, 16, 20],
-              "activations": ["selu", "selu", "selu"],
+              "degree": 14,
+              "layer_sizes": [16, 16],
+              "activations": ["selu", "selu"],
 
-              "batch_size": 100,
-              "patience": 50,
+              "batch_size": 150,
+              "patience": 10,
               }
     # Default value for activation is "selu" if activations do not match layer_sizes
     if h_pars["activations"] is None or \
@@ -286,15 +334,17 @@ if __name__ == "__main__":
     models = []
     for i in range(1):
         # Compile model
-        model = get_model(name="Nouny" + str(i), input_size=len(sc_ens_train_f.columns), layer_sizes=h_pars["layer_sizes"],
+        model = get_model(name="Nouny" + str(i), input_size=len(sc_ens_train_f.columns),
+                          layer_sizes=h_pars["layer_sizes"],
                           activations=h_pars["activations"], degree=h_pars["degree"])
-        model.compile(optimizer="adam", loss=build_quantile_loss(h_pars["degree"]))
+        model.compile(optimizer="adam", loss=build_custom_loss(h_pars["degree"]),
+                      metrics=[build_crps_loss(h_pars["degree"])])
 
         # Fit model
         history = model.fit(y=sc_obs_train_f,
                             x=sc_ens_train_f,
                             batch_size=h_pars["batch_size"],
-                            epochs=500,
+                            epochs=100,
                             verbose=1,
                             validation_freq=1,
                             validation_split=0.1,
@@ -306,6 +356,7 @@ if __name__ == "__main__":
         # Plot the learning curves
         plt.plot(history.history["loss"], label="loss")
         plt.plot(history.history["val_loss"], label="val_loss")
+        plt.plot(history.history["val_crps"], label="val_crps")
         plt.legend()
         plt.xlabel("Epochs", fontdict=fontdict_axis)
         plt.title(model.name + " Run " + str(i) + " - Training Plot - Horizon " + str(h_pars["horizon"]),
@@ -314,18 +365,21 @@ if __name__ == "__main__":
 
         # Evaluate model
         train = pd.DataFrame(model.predict(sc_ens_train_f), index=sc_ens_train_f.index)
-        generate_pit_plot(sc_obs_train_f, get_quantiles(train, np.arange(0.01, 1, 0.01)),
+        generate_pit_plot(sc_obs_train_f, get_quantiles(train, np.arange(0.0, 1.01, 0.01)),
                           model.name + "Training set - Horizon " + str(h_pars["horizon"]), n_bins=50)
         test = pd.DataFrame(model.predict(sc_ens_test_f), index=sc_ens_test_f.index)
-        generate_forecast_plots(sc_obs_test_f[::51], test[::51], quantile_levels=np.arange(0.01, 1, 0.01), n=20)
-        generate_pit_plot(sc_obs_test_f, get_quantiles(test, np.arange(0.01, 1, 0.01)),
+        generate_forecast_plots(sc_obs_test_f[::51], test[::51], quantile_levels=np.arange(0.0, 1.01, 0.01), n=20)
+        generate_pit_plot(sc_obs_test_f, get_quantiles(test, np.arange(0.0, 1.01, 0.01)),
                           model.name + "Test set - Horizon " + str(h_pars["horizon"]), n_bins=50)
         models.append(model)
+
+    if len(models)==1:
+        models += [models[0]]
 
     # Averaging the models
     for model in models:
         model.trainable = False
     average_model = average_models(models)
-    average_model.compile(loss=build_quantile_loss(h_pars["degree"]), optimizer="adam")
+    average_model.compile(loss=build_crps_loss(h_pars["degree"]), optimizer="adam")
     average_model.summary()
     average_model.evaluate(x=sc_ens_test_f, y=sc_obs_test_f)

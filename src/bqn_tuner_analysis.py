@@ -72,7 +72,7 @@ def evaluate_best_hps():
         # Import data
         sc_ens_train, sc_ens_test, sc_obs_train, sc_obs_test, scale_dict \
             = preprocess_data(fixed_params)
-        obs_scaler = scale_dict["obs"]
+        obs_scaler = scale_dict["wind_power"]
         obs_max = obs_scaler.data_max_[0]
         obs_min = obs_scaler.data_min_[0]
 

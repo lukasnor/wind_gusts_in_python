@@ -8,8 +8,9 @@ from scipy.special import binom
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 
 # For plot formatting
-fontdict_title = {"fontweight": "bold", "fontsize": 18}
+fontdict_title = {"fontweight": "bold", "fontsize": 24}
 fontdict_axis = {"fontweight": "bold", "fontsize": 15}
+figsize = (13, 7)
 
 
 # Construction of the local model
@@ -162,12 +163,12 @@ def build_crps_loss2(degree: int, min=0.0, max=1.0, eps=0.0):
 
 def build_crps_loss3(degree: int, min=0.0, max=1.0):
     # random quantile levels
-    lql = tf.constant(np.random.random(100000))
+    lql = tf.constant(np.random.random(1000))
     # Bernstein polynomials to interpolate the CDF
     B = tf.constant(np.array(
         [binom(degree, j) * np.power(lql, j) * np.power(1 - lql, degree - j) for j in
          range(degree + 1)]).transpose(), dtype="float32")
-    lql2 = tf.constant(np.random.random(100000), dtype="float32")
+    lql2 = tf.constant(np.random.random(1000), dtype="float32")
     B2 = tf.constant(np.array(
         [binom(degree, j) * np.power(lql2, j) * np.power(1 - lql2, degree - j) for j in
          range(degree + 1)]).transpose(), dtype="float32")
@@ -256,8 +257,9 @@ def get_rank(obs: pd.DataFrame, quantiles: pd.DataFrame) -> pd.DataFrame:
 def generate_pit_plot(obs: pd.DataFrame, quantiles: pd.DataFrame, name: str,
                       n_bins: int) -> None:
     ranks = get_rank(obs, quantiles)
+    plt.figure(figsize=figsize)
     plt.hist(ranks, bins=n_bins)
-    plt.hlines(len(ranks) / n_bins, linestyles="dashed", color="black", xmin=0, xmax=100)
+    plt.hlines(len(ranks) / n_bins, linestyles="dashed", color="black", xmin=0, xmax=101)
     plt.title("Rank Histogram - " + name, fontdict=fontdict_title)
     plt.show()
 
@@ -268,6 +270,7 @@ def generate_forecast_plots(y_true: pd.DataFrame, y_pred: pd.DataFrame, quantile
     if n is None:
         n = y_true.shape[0]
     for i in range(n):
+        plt.figure(figsize=figsize)
         plt.plot(q.iloc[(i, slice(None))], quantile_levels, color="blue", label="forecast")
         plt.vlines(y_true.iloc[i], ymin=quantile_levels.min(), ymax=quantile_levels.max(),
                    label="observation", color="red", linestyles="dashed")
@@ -298,7 +301,10 @@ def preprocess_data(h_pars: dict):
     n_ens = len(ensembles.index.get_level_values(1).unique())
 
     # Split train and test set according to h_pars["train_split"]
-    dates = observations.index.intersection(ensembles.index.get_level_values(0).unique())
+    possible_dates = observations.index.map(lambda d: d.ceil(freq="D")).unique()
+    dates = possible_dates.intersection(ensembles.index.get_level_values(0).unique() \
+                                        .map(lambda d: d.floor(freq="D"))) \
+        .map(lambda d: d + pd.Timedelta(hours=h_pars["horizon"]))
     n_obs = len(dates)
     n_train = int(len(dates) * h_pars["train_split"])
     # i_train = np.sort(np.random.choice(n_obs, size=n_train, replace=False))  # randomize the train and test set, not nice
@@ -307,28 +313,35 @@ def preprocess_data(h_pars: dict):
     i_test = np.arange(n_train, n_obs)
     dates_train = dates[i_train]
     dates_test = dates[i_test]
+    # Select dates and add the wind power data to the weather ensembles
     ens_train = ensembles.loc[(dates_train, slice(None))]
+    ens_train["wind_power"] = observations.loc[ens_train.index.get_level_values(0).map(
+        lambda d: d - pd.Timedelta(hours=h_pars["horizon"]))].set_index(ens_train.index)
     ens_test = ensembles.loc[(dates_test, slice(None))]
+    ens_test["wind_power"] = observations.loc[ens_test.index.get_level_values(0).map(
+        lambda d: d - pd.Timedelta(hours=h_pars["horizon"]))].set_index(ens_test.index)
+    # Here the power data has to be joined to the ensembles
     obs_train = observations.loc[dates_train]
     obs_test = observations.loc[dates_test]
 
     # Define scaler types for each variable
     scale_dict = {"u100": StandardScaler(), "v100": StandardScaler(), "t2m": StandardScaler(),
                   "sp": StandardScaler(),
-                  "speed": MinMaxScaler()}
+                  "speed": MinMaxScaler(),
+                  "wind_power": MinMaxScaler()}  # MinMaxScaler more suitable for power data.
+    # But even better when not aggregated
     # Scale ensembles
     fit_scalers(ens_train, scale_dict)
     sc_ens_train = scale(ens_train, scale_dict)
     sc_ens_test = scale(ens_test, scale_dict)
 
     # Scale observations
-    obs_scaler = MinMaxScaler()  # MinMaxScaler more suitable for power data. But even better when not aggregated
-    obs_scaler.fit(obs_train)
+    obs_scaler = scale_dict["wind_power"]
+    # obs_scaler.fit(obs_train) # already scaled with the
     sc_obs_train = pd.DataFrame(data=obs_scaler.transform(obs_train), index=obs_train.index,
                                 columns=obs_train.columns)
     sc_obs_test = pd.DataFrame(data=obs_scaler.transform(obs_test), index=obs_test.index,
                                columns=obs_test.columns)
-    scale_dict["obs"] = obs_scaler  # return the scale_dict to unscale for the crps
     # Return the processed data
     return sc_ens_train, sc_ens_test, sc_obs_train, sc_obs_test, scale_dict
 
@@ -386,16 +399,16 @@ def format_data(h_pars: dict, sc_ens_train, sc_ens_test, sc_obs_train, sc_obs_te
 
 if __name__ == "__main__":
     # Get the data in a processed form
-    h_pars = {"horizon": 9,  #
+    h_pars = {"horizon": 3,  #
               "variables": None,
               "train_split": 0.85,
 
-              "aggregation": "mean",
-              "degree": 20,
-              "layer_sizes": [25, 25, 20, 15],
-              "activations": ["selu", "selu", "selu", "selu"],
+              "aggregation": "single+std",
+              "degree": 15,
+              "layer_sizes": [20, 15],
+              "activations": ["selu", "selu", "selu"],
 
-              "batch_size": 25,
+              "batch_size": 200,
               "patience": 27,
               }
     # Default value for activation is "selu" if activations do not match layer_sizes
@@ -409,7 +422,7 @@ if __name__ == "__main__":
     # Import the data
     sc_ens_train, sc_ens_test, sc_obs_train, sc_obs_test, scale_dict \
         = preprocess_data(h_pars=h_pars)
-    obs_scaler = scale_dict["obs"]
+    obs_scaler = scale_dict["wind_power"]
     obs_max = obs_scaler.data_max_
     obs_min = obs_scaler.data_min_
     # Format the data
@@ -423,7 +436,7 @@ if __name__ == "__main__":
     models = []
     for i in range(5):
         # Compile model
-        model = get_model(name="Nouny" + str(i),
+        model = get_model(name="Foo" + str(i),
                           input_size=len(sc_ens_train_f.columns),
                           layer_sizes=h_pars["layer_sizes"],
                           activations=h_pars["activations"],
@@ -450,26 +463,32 @@ if __name__ == "__main__":
                             use_multiprocessing=True
                             )
         # Plot the learning curves
-        plt.plot(history.history["loss"], label="loss")
-        plt.plot(history.history["val_loss"], label="val_loss")
-        # plt.plot(history.history["val_crps"], label="val_crps")
-        plt.legend()
-        plt.xlabel("Epochs", fontdict=fontdict_axis)
-        plt.title(
-            model.name + " Run " + str(i) + " - Training Plot - Horizon " + str(h_pars["horizon"]),
-            fontdict=fontdict_title)
-        plt.show()
+        with plt.xkcd():
+            plt.figure(figsize=figsize)
+            plt.plot(history.history["loss"], label="loss")
+            plt.plot(history.history["val_loss"], label="val_loss")
+            plt.plot(history.history["val_crps"], label="val_crps")
+            plt.legend()
+            plt.xlabel("Epochs", fontdict=fontdict_axis)
+            plt.title(
+                model.name + " Run " + str(i) + " - Training Plot - Horizon " + str(
+                    h_pars["horizon"]),
+                fontdict=fontdict_title)
+            plt.show()
 
         # Evaluate model
         train = pd.DataFrame(model.predict(sc_ens_train_f), index=sc_ens_train_f.index)
-        generate_pit_plot(sc_obs_train_f, get_quantiles(train, np.arange(0.0, 1.01, 0.01)),
-                          model.name + "Training set - Horizon " + str(h_pars["horizon"]),
-                          n_bins=50)
+        with plt.xkcd():
+            generate_pit_plot(sc_obs_train_f, get_quantiles(train, np.arange(0.0, 1.01, 0.01)),
+                              "Rank Histogram for horizon " + str(h_pars["horizon"]),
+                              n_bins=50)
         test = pd.DataFrame(model.predict(sc_ens_test_f), index=sc_ens_test_f.index)
-        generate_forecast_plots(sc_obs_test_f[::51], test[::51],
-                                quantile_levels=np.arange(0.0, 1.01, 0.01), n=5)
-        generate_pit_plot(sc_obs_test_f, get_quantiles(test, np.arange(0.0, 1.01, 0.01)),
-                          model.name + "Test set - Horizon " + str(h_pars["horizon"]), n_bins=50)
+        with plt.xkcd():
+            generate_forecast_plots(sc_obs_test_f[::51], test[::51],
+                                    quantile_levels=np.arange(0.0, 1.01, 0.01), n=5)
+        with plt.xkcd():
+            generate_pit_plot(sc_obs_test_f, get_quantiles(test, np.arange(0.0, 1.01, 0.01)),
+                              "Horizon " + str(h_pars["horizon"]), n_bins=50)
         models.append(model)
 
     if len(models) == 1:
@@ -486,4 +505,5 @@ if __name__ == "__main__":
     test = pd.DataFrame(average_model.predict(sc_ens_test_f), index=sc_ens_test_f.index)
     with plt.xkcd():
         generate_pit_plot(sc_obs_test_f, get_quantiles(test, np.arange(0.0, 1.01, 0.01)),
-                          "Rank Histogram of (9,\"mean\")", n_bins=50)
+                          "Test data\n" + "Horizon " + str(h_pars["horizon"]) + " - Aggregation " +
+                          h_pars["aggregation"], n_bins=50)

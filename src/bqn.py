@@ -297,14 +297,19 @@ def preprocess_data(h_pars: dict):
     # Select only relevant horizon
     ensembles = ensembles.sort_index(level=[0, 1, 2])
     ensembles = ensembles.loc[(h_pars["horizon"], slice(None), slice(None))]
-    # ensembles.index = ensembles.index.droplevel(0)
+    ensembles.index = ensembles.index.droplevel(0)
     n_ens = len(ensembles.index.get_level_values(1).unique())
 
     # Split train and test set according to h_pars["train_split"]
-    possible_dates = observations.index.map(lambda d: d.ceil(freq="D")).unique()
-    dates = possible_dates.intersection(ensembles.index.get_level_values(0).unique() \
-                                        .map(lambda d: d.floor(freq="D"))) \
-        .map(lambda d: d + pd.Timedelta(hours=h_pars["horizon"]))
+    possible_dates = observations.index.map(lambda d: d.ceil(freq="D")).intersection(\
+        observations.index.map(lambda d: d.floor(freq="D")))
+    print("Possible dates", possible_dates[0], possible_dates[-1])
+    print("Ensemble index", ensembles.index.get_level_values(0)[0], ensembles.index.get_level_values(0)[-1])
+    # round do even hour or stay if horizon =24
+    dates = possible_dates.intersection(ensembles.index.get_level_values(0).unique().map(
+        lambda d: d - pd.Timedelta(hours=h_pars["horizon"]))).map(
+        lambda d: d + pd.Timedelta(hours=h_pars["horizon"]))
+    print("Dates", dates[0], dates[-1])
     n_obs = len(dates)
     n_train = int(len(dates) * h_pars["train_split"])
     # i_train = np.sort(np.random.choice(n_obs, size=n_train, replace=False))  # randomize the train and test set, not nice
@@ -403,12 +408,12 @@ if __name__ == "__main__":
               "variables": None,
               "train_split": 0.85,
 
-              "aggregation": "single+std",
-              "degree": 15,
+              "aggregation": "mean",
+              "degree": 8,
               "layer_sizes": [20, 15],
               "activations": ["selu", "selu", "selu"],
 
-              "batch_size": 200,
+              "batch_size": 21,
               "patience": 27,
               }
     # Default value for activation is "selu" if activations do not match layer_sizes

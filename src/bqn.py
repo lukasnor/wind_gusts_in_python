@@ -294,7 +294,7 @@ def preprocess_data(h_pars: dict):
     # Select only relevant horizon
     ensembles = ensembles.sort_index(level=[0, 1, 2])
     ensembles = ensembles.loc[(h_pars["horizon"], slice(None), slice(None))]
-    #ensembles.index = ensembles.index.droplevel(0)
+    # ensembles.index = ensembles.index.droplevel(0)
     n_ens = len(ensembles.index.get_level_values(1).unique())
 
     # Split train and test set according to h_pars["train_split"]
@@ -386,17 +386,17 @@ def format_data(h_pars: dict, sc_ens_train, sc_ens_test, sc_obs_train, sc_obs_te
 
 if __name__ == "__main__":
     # Get the data in a processed form
-    h_pars = {"horizon": 6,  #
+    h_pars = {"horizon": 9,  #
               "variables": None,
               "train_split": 0.85,
 
-              "aggregation": "single+std",
-              "degree": 12,
-              "layer_sizes": [16, 16],
-              "activations": ["selu", "selu"],
+              "aggregation": "mean",
+              "degree": 20,
+              "layer_sizes": [25, 25, 20, 15],
+              "activations": ["selu", "selu", "selu", "selu"],
 
-              "batch_size": 150,
-              "patience": 10,
+              "batch_size": 25,
+              "patience": 27,
               }
     # Default value for activation is "selu" if activations do not match layer_sizes
     if h_pars["activations"] is None or \
@@ -421,7 +421,7 @@ if __name__ == "__main__":
 
     # Average over models
     models = []
-    for i in range(2):
+    for i in range(5):
         # Compile model
         model = get_model(name="Nouny" + str(i),
                           input_size=len(sc_ens_train_f.columns),
@@ -433,14 +433,14 @@ if __name__ == "__main__":
         #               metrics=[build_crps_loss(h_pars["degree"],
         #                                        scale=obs_max -obs_min)])
         model.compile(optimizer="adam",
-                      loss=build_crps_loss3(h_pars["degree"], obs_min, obs_max),
-                      metrics=[build_quantile_loss(h_pars["degree"])]
+                      loss=build_quantile_loss(h_pars["degree"]),
+                      metrics=[build_crps_loss3(h_pars["degree"], obs_min, obs_max)]
                       )
         # Fit model
         history = model.fit(y=sc_obs_train_f,
                             x=sc_ens_train_f,
                             batch_size=h_pars["batch_size"],
-                            epochs=50,
+                            epochs=150,
                             verbose=1,
                             validation_freq=1,
                             validation_split=0.1,
@@ -467,7 +467,7 @@ if __name__ == "__main__":
                           n_bins=50)
         test = pd.DataFrame(model.predict(sc_ens_test_f), index=sc_ens_test_f.index)
         generate_forecast_plots(sc_obs_test_f[::51], test[::51],
-                                quantile_levels=np.arange(0.0, 1.01, 0.01), n=20)
+                                quantile_levels=np.arange(0.0, 1.01, 0.01), n=5)
         generate_pit_plot(sc_obs_test_f, get_quantiles(test, np.arange(0.0, 1.01, 0.01)),
                           model.name + "Test set - Horizon " + str(h_pars["horizon"]), n_bins=50)
         models.append(model)
@@ -479,6 +479,11 @@ if __name__ == "__main__":
     for model in models:
         model.trainable = False
     average_model = average_models(models)
-    average_model.compile(loss=build_crps_loss3(h_pars["degree"], obs_min, obs_max), optimizer="adam")
+    average_model.compile(loss=build_crps_loss3(h_pars["degree"], obs_min, obs_max),
+                          optimizer="adam")
     average_model.summary()
     average_model.evaluate(x=sc_ens_test_f, y=sc_obs_test_f)
+    test = pd.DataFrame(average_model.predict(sc_ens_test_f), index=sc_ens_test_f.index)
+    with plt.xkcd():
+        generate_pit_plot(sc_obs_test_f, get_quantiles(test, np.arange(0.0, 1.01, 0.01)),
+                          "Rank Histogram of (9,\"mean\")", n_bins=50)

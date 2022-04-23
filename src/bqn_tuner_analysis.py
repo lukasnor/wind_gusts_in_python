@@ -1,17 +1,16 @@
 import json
 from itertools import product
-import pandas as pd
-import numpy as np
-import tensorflow as tf
+
 import matplotlib.pyplot as plt
-from bqn import preprocess_data, \
-    format_data, get_model, build_custom_loss, build_crps_loss, average_models, get_quantiles
+import pandas as pd
 from keras.callbacks import EarlyStopping
 from keras.optimizer_v2 import adam
-import properscoring as ps
+
+from bqn import preprocess_data, \
+    format_data, get_model, build_quantile_loss, build_crps_loss3, average_models
 
 # For plot formatting
-fontdict_title = {"fontweight": "bold", "fontsize": 18}
+fontdict_title = {"fontweight": "bold", "fontsize": 24}
 fontdict_axis = {"fontweight": "bold", "fontsize": 15}
 
 horizons = [3, 6, 9, 12, 15, 18, 21, 24]
@@ -115,9 +114,9 @@ def evaluate_best_hps():
                                   degree=fixed_params["degree"]
                                   )
                 model.compile(optimizer=adam.Adam(fixed_params["learning_rate"]),
-                              loss=build_custom_loss(fixed_params["degree"]),
-                              metrics=[build_crps_loss(fixed_params["degree"],
-                                                       scale=obs_max - obs_min)]
+                              loss=build_quantile_loss(fixed_params["degree"]),
+                              metrics=[build_crps_loss3(fixed_params["degree"],
+                                                       obs_min,obs_max)]
                               )
                 history = model.fit(x=sc_ens_train_f,
                                     y=sc_obs_train_f,
@@ -134,22 +133,77 @@ def evaluate_best_hps():
 
                 # Evaluation
                 model.compile(optimizer="adam",
-                              loss=build_crps_loss(fixed_params["degree"], obs_min, obs_max))
+                              loss=build_crps_loss3(fixed_params["degree"], obs_min, obs_max))
                 evaluation.loc[index, "run" + str(i + 1)] \
                     = model.evaluate(x=sc_ens_test_f, y=sc_obs_test_f)
                 print(evaluation)
                 models.append(model)
 
             average_model = average_models(models)
-            average_model.compile(loss=build_crps_loss(fixed_params["degree"],
-                                                       scale=obs_max - obs_min)
+            average_model.compile(loss=build_crps_loss3(fixed_params["degree"],
+                                                       obs_min, obs_max)
                                   )
             evaluation.loc[index, "average"] = average_model.evaluate(x=sc_ens_test_f,
                                                                       y=sc_obs_test_f)
             print(evaluation)
 
-    evaluation.to_csv("../results/evaluation.csv")
+    evaluation.to_csv("../results/bqn_evaluation.csv")
+
+
+def plot_crps_per_horizon_per_aggregation():
+    evaluation = pd.read_csv("../results/bqn_evaluation.csv")
+    evaluation = evaluation.reset_index().pivot(index=["horizon", "aggregation"], columns=[])
+    evaluation = evaluation[evaluation.columns.drop("index")]
+    for aggregation in aggregations:
+        with plt.xkcd():
+            plt.figure(figsize=(13, 7))
+            plt.scatter([[horizon for _ in range(5)] for horizon in horizons],
+                        evaluation.loc[(slice(None), aggregation), :"run5"].values, c="blue",
+                        label="individual")
+            plt.scatter(horizons, evaluation.loc[(slice(None), aggregation), "average"], c="red",
+                        label="average")
+            plt.legend()
+            plt.title("CRPS for aggregation \"" + aggregation + "\"",
+                      fontdict=fontdict_title)
+            plt.xticks(ticks=horizons, labels=horizons)
+            plt.xlabel("Horizons", fontdict=fontdict_axis)
+            # plt.savefig("../results/plots/crps_per_horizon_per_aggregation/"+aggregation+".png")
+            plt.show()
+
+
+def plot_crps_per_aggregation():
+    evaluation = pd.read_csv("../results/bqn_evaluation.csv")
+    evaluation = evaluation.reset_index().pivot(index=["horizon", "aggregation"], columns=[])
+    evaluation = evaluation[evaluation.columns.drop("index")]
+    evaluation = evaluation.reset_index().pivot(index="aggregation", columns=["horizon"])
+    with plt.xkcd():
+        plt.figure(figsize=(13, 7))
+        plt.boxplot(evaluation.values.transpose())
+        locs, _ = plt.xticks()
+        plt.xticks(ticks=locs, labels=evaluation.index)
+        plt.xlabel("Aggregations", fontdict=fontdict_axis)
+        plt.ylabel("CRPS", fontdict=fontdict_axis)
+        plt.title("Performance per Aggregation", fontdict=fontdict_title)
+        plt.show()
+        # plt.savefig("../results/plots/crps_per_aggregation.png")
+
+
+def plot_crps_per_horizon():
+    evaluation = pd.read_csv("../results/bqn_evaluation.csv")
+    evaluation = evaluation.reset_index().pivot(index=["horizon", "aggregation"], columns=[])
+    evaluation = evaluation[evaluation.columns.drop("index")]
+    evaluation = evaluation.reset_index().pivot(index="horizon", columns=["aggregation"])
+    with plt.xkcd():
+        plt.figure(figsize=(13, 7))
+        plt.boxplot(evaluation.values.transpose())
+        locs, _ = plt.xticks()
+        plt.xticks(ticks=locs, labels=evaluation.index)
+        plt.xlabel("Horizons", fontdict=fontdict_axis)
+        plt.ylabel("CRPS", fontdict=fontdict_axis)
+        plt.title("Performance per Horizon", fontdict=fontdict_title)
+        plt.show()
+        # plt.savefig("../results/plots/crps_per_horizon.png")
 
 
 if __name__ == "__main__":
-    evaluate_best_hps()
+    print("Hello, World!")

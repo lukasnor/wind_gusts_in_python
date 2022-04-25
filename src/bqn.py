@@ -458,8 +458,9 @@ if __name__ == "__main__":
                             verbose=1,
                             validation_freq=1,
                             validation_split=0.1,
-                            callbacks=[EarlyStopping(patience=h_pars["patience"]
-                                                     # , restore_best_weights=True
+                            callbacks=[EarlyStopping(monitor="val_crps",
+                                                     patience=h_pars["patience"],
+                                                     restore_best_weights=True
                                                      )],
                             use_multiprocessing=True
                             )

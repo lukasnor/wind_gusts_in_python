@@ -2,6 +2,7 @@ import json
 from itertools import product, chain, combinations
 
 import keras.optimizer_v2.adam
+import keras_tuner
 from keras.callbacks import EarlyStopping
 from keras_tuner import Hyperband
 
@@ -33,7 +34,8 @@ def run_tuner():
     for horizon in horizons:
         fixed_params = {"horizon": horizon, "variables": variables, "train_split": 0.85}
         # Import data
-        sc_ens_train, sc_ens_test, sc_obs_train, sc_obs_test, scale_dict = preprocess_data(fixed_params)
+        sc_ens_train, sc_ens_test, sc_obs_train, sc_obs_test, scale_dict = preprocess_data(
+            fixed_params)
         obs_scaler = scale_dict["wind_power"]
         obs_max = obs_scaler.data_max_
         obs_min = obs_scaler.data_min_
@@ -47,7 +49,7 @@ def run_tuner():
                                                                                        sc_obs_train,
                                                                                        sc_obs_test)
             if aggregation in ["single", "single+std"]:
-                batch_size = 50
+                batch_size = 100
             else:
                 batch_size = 5
 
@@ -64,8 +66,8 @@ def run_tuner():
                 # max_layer_size = hp_input_size * 4
                 # layer_step = max(int((hp_input_size / 2)), 1)
                 min_layer_size = hp_degree + 1
-                max_layer_size = min_layer_size * 8
-                layer_step = int(min_layer_size/2)
+                max_layer_size = min_layer_size * 6
+                layer_step = int(min_layer_size / 2)
                 hp_depth = hp.Int(name="depth", min_value=1, max_value=max_depth, default=max_depth)
 
                 hp_layer_sizes = [
@@ -94,18 +96,18 @@ def run_tuner():
                 return model
 
             tuner = Hyperband(model_builder,
-                              objective='val_crps',
+                              objective=keras_tuner.Objective('val_crps', direction="min"),
                               max_epochs=125,
                               factor=3,
                               directory='../results/tuning',
                               project_name="horizon:" + str(horizon) + "_agg:" + str(aggregation))
-            stop_early = EarlyStopping(monitor='val_loss', patience=25, restore_best_weights=True)
+            stop_early = EarlyStopping(monitor='val_crps', patience=25, restore_best_weights=True)
 
             # Run the search
             tuner.search(sc_ens_train_f, sc_obs_train_f,
                          epochs=150,
                          batch_size=batch_size,
-                         validation_split=0.2,
+                         validation_split=0.1,
                          callbacks=[stop_early],
                          use_multiprocessing=True)
 

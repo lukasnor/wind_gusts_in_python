@@ -125,7 +125,8 @@ def evaluate_best_hps():
                                     verbose=1,
                                     validation_freq=1,
                                     validation_split=0.1,
-                                    callbacks=[EarlyStopping(patience=fixed_params["patience"],
+                                    callbacks=[EarlyStopping(monitor="val_crps",
+                                                             patience=fixed_params["patience"],
                                                              restore_best_weights=True)],
                                     use_multiprocessing=True
                                     )

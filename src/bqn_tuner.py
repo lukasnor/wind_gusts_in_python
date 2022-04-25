@@ -12,7 +12,8 @@ from bqn_tuner_analysis import load_hyperparameters_from_folders
 # Returns all sublists of list
 def powerset(list):
     # Example: powerset([1,2,3]) --> [[], [1], [2], [3], [1,2], [1,3], [2,3], [1,2,3]]
-    return map(lambda t: [i for i in t], chain.from_iterable(combinations(list, r) for r in range(len(list) + 1)))
+    return map(lambda t: [i for i in t],
+               chain.from_iterable(combinations(list, r) for r in range(len(list) + 1)))
 
 
 # possible values of the fixed params
@@ -26,8 +27,8 @@ fixed_params_selections = [{"horizon": a, "variables": b, "aggregation": c} for 
 
 def run_tuner():
     # Test run for horizon = 6 and aggregation = single+std
-    #aggregations = ["single+std"]
-    #horizons = [6]
+    # aggregations = ["single+std"]
+    # horizons = [6]
     for horizon in horizons:
         fixed_params = {"horizon": horizon, "variables": variables, "train_split": 0.85}
         # Import data
@@ -36,21 +37,21 @@ def run_tuner():
         for aggregation in aggregations:
             fixed_params["aggregation"] = aggregation
             # Format data according to aggregation method
-            sc_ens_train_f, sc_ens_test_f, sc_obs_train_f, sc_obs_test_f = format_data(fixed_params, sc_ens_train,
-                                                                                       sc_ens_test, sc_obs_train,
+            sc_ens_train_f, sc_ens_test_f, sc_obs_train_f, sc_obs_test_f = format_data(fixed_params,
+                                                                                       sc_ens_train,
+                                                                                       sc_ens_test,
+                                                                                       sc_obs_train,
                                                                                        sc_obs_test)
             if aggregation in ["single", "single+std"]:
                 batch_size = 50
             else:
-                batch_size = 25
-
+                batch_size = 5
 
             def model_builder(hp):
                 hp.Fixed(name="horizon", value=horizon)
                 hp.Fixed(name="aggregation", value=aggregation)
                 hp_input_size = hp.Fixed(name="input_size", value=len(sc_ens_train_f.columns))
                 hp.Fixed(name="batch_size", value=batch_size)
-
 
                 hp_degree = hp.Int(name="degree", min_value=4, max_value=25)
 
@@ -61,24 +62,28 @@ def run_tuner():
                 hp_depth = hp.Int(name="depth", min_value=1, max_value=max_depth, default=max_depth)
 
                 hp_layer_sizes = [
-                    hp.Int(name="layer" + str(i) + "_size", min_value=min_layer_size, max_value=max_layer_size,
-                           step=layer_step, parent_name="depth", parent_values=[*range(i + 1, max_depth + 1)]) for i in
+                    hp.Int(name="layer" + str(i) + "_size", min_value=min_layer_size,
+                           max_value=max_layer_size,
+                           step=layer_step, parent_name="depth",
+                           parent_values=[*range(i + 1, max_depth + 1)]) for i in
                     range(max_depth)]
                 for _ in range(hp_layer_sizes.count(None)):
                     hp_layer_sizes.remove(None)
                 hp_layer_sizes.sort(reverse=True)
 
-                hp_learning_rate = hp.Choice(name="learning_rate", values=[1.0, 1e-1, 1e-2, 1e-3, 1e-4])
+                hp_learning_rate = hp.Choice(name="learning_rate",
+                                             values=[1.0, 1e-1, 1e-2, 1e-3, 1e-4])
 
                 hp_activation = hp.Choice(name="activation", values=["relu", "selu"])
                 hp_activations = [hp_activation for _ in range(hp_depth)]
-                print("degree: " + str(hp_degree), "depth: " + str(hp_depth), "layer_sizes: " + str(hp_layer_sizes),
+                print("degree: " + str(hp_degree), "depth: " + str(hp_depth),
+                      "layer_sizes: " + str(hp_layer_sizes),
                       "activation: " + str(hp_activation), sep="\n")
                 model = get_model(name="foo", input_size=hp_input_size, layer_sizes=hp_layer_sizes,
                                   activations=hp_activations, degree=hp_degree)
-                model.compile(loss=build_quantile_loss(hp_degree), optimizer=keras.optimizer_v2.adam.Adam(hp_learning_rate))
+                model.compile(loss=build_quantile_loss(hp_degree),
+                              optimizer=keras.optimizer_v2.adam.Adam(hp_learning_rate))
                 return model
-
 
             tuner = Hyperband(model_builder,
                               objective='val_loss',
@@ -89,7 +94,10 @@ def run_tuner():
             stop_early = EarlyStopping(monitor='val_loss', patience=27, restore_best_weights=True)
 
             # Run the search
-            tuner.search(sc_ens_train_f, sc_obs_train_f, epochs=150, batch_size=batch_size, validation_split=0.2,
+            tuner.search(sc_ens_train_f, sc_obs_train_f,
+                         epochs=150,
+                         batch_size=batch_size,
+                         validation_split=0.2,
                          callbacks=[stop_early],
                          use_multiprocessing=True)
 
@@ -99,16 +107,17 @@ def run_tuner():
             # For each set of hps, average model over 3 runs
             for hp in best_hps_candidates:
                 print(hp.values)
-                models = [get_model(name="model"+str(i),
+                models = [get_model(name="model" + str(i),
                                     input_size=hp["input_size"],
-                                    layer_sizes=[hp["layer" + str(i) + "_size"] for i in range(hp["depth"])],
+                                    layer_sizes=[hp["layer" + str(i) + "_size"] for i in
+                                                 range(hp["depth"])],
                                     activations=[hp["activation"] for _ in range(hp["depth"])],
                                     degree=hp["degree"])
                           for i in range(3)]
                 for model in models:
                     model.compile(optimizer=keras.optimizer_v2.adam.Adam(hp["learning_rate"]),
                                   loss=build_quantile_loss(hp["degree"]))
-                    print("Training of ",model.name)
+                    print("Training of ", model.name)
                     model.fit(x=sc_ens_train_f,
                               y=sc_obs_train_f,
                               batch_size=batch_size,
@@ -121,10 +130,11 @@ def run_tuner():
                               )
                 avg_model = average_models(models)
                 avg_model.compile(optimizer=keras.optimizer_v2.adam.Adam(hp["learning_rate"]),
-                              loss=build_quantile_loss(hp["degree"]))
+                                  loss=build_quantile_loss(hp["degree"]))
             best_model_candidates.append(avg_model)
         # Evaluate the hp sets
-        evaluations = [*map(lambda m: m.evaluate(x=sc_ens_test_f, y=sc_obs_test_f), best_model_candidates)]
+        evaluations = [
+            *map(lambda m: m.evaluate(x=sc_ens_test_f, y=sc_obs_test_f), best_model_candidates)]
         # .. and find the best hps
         best_index = evaluations.index(min(evaluations))
         best_hps = (best_hps_candidates[best_index]).values
@@ -139,7 +149,6 @@ def run_tuner():
 
 def evaluate_hps():
     hps = load_hyperparameters_from_folders()
-
 
 
 if __name__ == "__main__":

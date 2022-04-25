@@ -408,12 +408,12 @@ if __name__ == "__main__":
               "variables": None,
               "train_split": 0.85,
 
-              "aggregation": "mean",
+              "aggregation": "single",
               "degree": 8,
               "layer_sizes": [20, 15],
               "activations": ["selu", "selu", "selu"],
 
-              "batch_size": 21,
+              "batch_size": 51,
               "patience": 27,
               }
     # Default value for activation is "selu" if activations do not match layer_sizes
@@ -440,16 +440,12 @@ if __name__ == "__main__":
     # Average over models
     models = []
     for i in range(5):
-        # Compile model
+        # Build model
         model = get_model(name="Foo" + str(i),
                           input_size=len(sc_ens_train_f.columns),
                           layer_sizes=h_pars["layer_sizes"],
                           activations=h_pars["activations"],
                           degree=h_pars["degree"])
-        # model.compile(optimizer="adam",
-        #               loss=build_custom_loss(h_pars["degree"]),
-        #               metrics=[build_crps_loss(h_pars["degree"],
-        #                                        scale=obs_max -obs_min)])
         model.compile(optimizer="adam",
                       loss=build_quantile_loss(h_pars["degree"]),
                       metrics=[build_crps_loss3(h_pars["degree"], obs_min, obs_max)]
@@ -458,7 +454,7 @@ if __name__ == "__main__":
         history = model.fit(y=sc_obs_train_f,
                             x=sc_ens_train_f,
                             batch_size=h_pars["batch_size"],
-                            epochs=150,
+                            epochs=100,
                             verbose=1,
                             validation_freq=1,
                             validation_split=0.1,
@@ -505,7 +501,7 @@ if __name__ == "__main__":
     average_model = average_models(models)
     average_model.compile(loss=build_crps_loss3(h_pars["degree"], obs_min, obs_max),
                           optimizer="adam")
-    average_model.summary()
+    # Evaluate the averaged model
     average_model.evaluate(x=sc_ens_test_f, y=sc_obs_test_f)
     test = pd.DataFrame(average_model.predict(sc_ens_test_f), index=sc_ens_test_f.index)
     with plt.xkcd():

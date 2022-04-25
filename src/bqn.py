@@ -404,16 +404,16 @@ def format_data(h_pars: dict, sc_ens_train, sc_ens_test, sc_obs_train, sc_obs_te
 
 if __name__ == "__main__":
     # Get the data in a processed form
-    h_pars = {"horizon": 3,  #
+    h_pars = {"horizon": 9,  #
               "variables": None,
               "train_split": 0.85,
 
-              "aggregation": "single",
-              "degree": 8,
+              "aggregation": "all",
+              "degree": 12,
               "layer_sizes": [20, 15],
               "activations": ["selu", "selu", "selu"],
 
-              "batch_size": 51,
+              "batch_size": 25,
               "patience": 27,
               }
     # Default value for activation is "selu" if activations do not match layer_sizes
@@ -439,7 +439,7 @@ if __name__ == "__main__":
 
     # Average over models
     models = []
-    for i in range(5):
+    for i in range(2):
         # Build model
         model = get_model(name="Foo" + str(i),
                           input_size=len(sc_ens_train_f.columns),

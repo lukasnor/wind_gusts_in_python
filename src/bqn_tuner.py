@@ -5,7 +5,8 @@ import keras.optimizer_v2.adam
 from keras.callbacks import EarlyStopping
 from keras_tuner import Hyperband
 
-from bqn import preprocess_data, format_data, build_quantile_loss, get_model, average_models
+from bqn import preprocess_data, format_data, build_quantile_loss, build_crps_loss3, get_model, \
+    average_models
 from bqn_tuner_analysis import load_hyperparameters_from_folders
 
 
@@ -32,7 +33,10 @@ def run_tuner():
     for horizon in horizons:
         fixed_params = {"horizon": horizon, "variables": variables, "train_split": 0.85}
         # Import data
-        sc_ens_train, sc_ens_test, sc_obs_train, sc_obs_test = preprocess_data(fixed_params)
+        sc_ens_train, sc_ens_test, sc_obs_train, sc_obs_test, scale_dict = preprocess_data(fixed_params)
+        obs_scaler = scale_dict["wind_power"]
+        obs_max = obs_scaler.data_max_
+        obs_min = obs_scaler.data_min_
 
         for aggregation in aggregations:
             fixed_params["aggregation"] = aggregation
@@ -56,9 +60,12 @@ def run_tuner():
                 hp_degree = hp.Int(name="degree", min_value=4, max_value=25)
 
                 max_depth = 5
-                min_layer_size = max(int(hp_input_size / 4), 10)
-                max_layer_size = hp_input_size * 4
-                layer_step = max(int((hp_input_size / 2)), 1)
+                # min_layer_size = max(int(hp_input_size / 4), 10)
+                # max_layer_size = hp_input_size * 4
+                # layer_step = max(int((hp_input_size / 2)), 1)
+                min_layer_size = hp_degree + 1
+                max_layer_size = min_layer_size * 8
+                layer_step = int(min_layer_size/2)
                 hp_depth = hp.Int(name="depth", min_value=1, max_value=max_depth, default=max_depth)
 
                 hp_layer_sizes = [
@@ -82,16 +89,17 @@ def run_tuner():
                 model = get_model(name="foo", input_size=hp_input_size, layer_sizes=hp_layer_sizes,
                                   activations=hp_activations, degree=hp_degree)
                 model.compile(loss=build_quantile_loss(hp_degree),
-                              optimizer=keras.optimizer_v2.adam.Adam(hp_learning_rate))
+                              optimizer=keras.optimizer_v2.adam.Adam(hp_learning_rate),
+                              metrics=[build_crps_loss3(hp_degree, obs_min, obs_max)])
                 return model
 
             tuner = Hyperband(model_builder,
-                              objective='val_loss',
-                              max_epochs=81,
+                              objective='val_crps',
+                              max_epochs=125,
                               factor=3,
                               directory='../results/tuning',
                               project_name="horizon:" + str(horizon) + "_agg:" + str(aggregation))
-            stop_early = EarlyStopping(monitor='val_loss', patience=27, restore_best_weights=True)
+            stop_early = EarlyStopping(monitor='val_loss', patience=25, restore_best_weights=True)
 
             # Run the search
             tuner.search(sc_ens_train_f, sc_obs_train_f,
@@ -116,7 +124,8 @@ def run_tuner():
                           for i in range(3)]
                 for model in models:
                     model.compile(optimizer=keras.optimizer_v2.adam.Adam(hp["learning_rate"]),
-                                  loss=build_quantile_loss(hp["degree"]))
+                                  loss=build_quantile_loss(hp["degree"]),
+                                  metrics=[build_crps_loss3(hp["degree"], obs_min, obs_max)])
                     print("Training of ", model.name)
                     model.fit(x=sc_ens_train_f,
                               y=sc_obs_train_f,
@@ -130,7 +139,8 @@ def run_tuner():
                               )
                 avg_model = average_models(models)
                 avg_model.compile(optimizer=keras.optimizer_v2.adam.Adam(hp["learning_rate"]),
-                                  loss=build_quantile_loss(hp["degree"]))
+                                  loss=build_quantile_loss(hp["degree"]),
+                                  metrics=[build_crps_loss3(hp["degree"], obs_min, obs_max)])
             best_model_candidates.append(avg_model)
         # Evaluate the hp sets
         evaluations = [
@@ -147,9 +157,5 @@ def run_tuner():
             json.dump(best_hps, file, indent=2)
 
 
-def evaluate_hps():
-    hps = load_hyperparameters_from_folders()
-
-
 if __name__ == "__main__":
-    print("Nothing to do")
+    run_tuner()

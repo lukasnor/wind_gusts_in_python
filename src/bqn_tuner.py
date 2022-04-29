@@ -143,20 +143,20 @@ def run_tuner():
                 avg_model.compile(optimizer=keras.optimizer_v2.adam.Adam(hp["learning_rate"]),
                                   loss=build_quantile_loss(hp["degree"]),
                                   metrics=[build_crps_loss3(hp["degree"], obs_min, obs_max)])
-            best_model_candidates.append(avg_model)
-        # Evaluate the hp sets
-        evaluations = [
-            *map(lambda m: m.evaluate(x=sc_ens_test_f, y=sc_obs_test_f), best_model_candidates)]
-        # .. and find the best hps
-        best_index = evaluations.index(min(evaluations))
-        best_hps = (best_hps_candidates[best_index]).values
+                best_model_candidates.append(avg_model)
+            # Evaluate the hp sets
+            evaluations = [
+                *map(lambda m: m.evaluate(x=sc_ens_test_f, y=sc_obs_test_f), best_model_candidates)]
+            # .. and find the best hps
+            best_index = evaluations.index(min(evaluations))
+            best_hps = (best_hps_candidates[best_index]).values
 
-        print(best_hps)
-        print(evaluations[best_index])
-        # Save the best hps
-        with open("../results/tuning/" + "horizon:" + str(horizon) + "_agg:" + str(
-                aggregation) + "/best_hps.json", "w") as file:
-            json.dump(best_hps, file, indent=2)
+            print(best_hps)
+            print(evaluations[best_index])
+            # Save the best hps
+            with open("../results/tuning/" + "horizon:" + str(horizon) + "_agg:" + str(
+                    aggregation) + "/best_hps.json", "w") as file:
+                json.dump(best_hps, file, indent=2)
 
 
 if __name__ == "__main__":

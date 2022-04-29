@@ -254,18 +254,21 @@ def get_rank(obs: pd.DataFrame, quantiles: pd.DataFrame) -> pd.DataFrame:
     return pd.concat([obs, quantiles], axis=1).rank(axis=1).iloc[:, 0]
 
 
-def generate_pit_plot(obs: pd.DataFrame, quantiles: pd.DataFrame, name: str,
-                      n_bins: int) -> None:
+def generate_pit_plot(obs: pd.DataFrame, quantiles: pd.DataFrame, name: str, n_bins: int,
+                      path=None) -> None:
     ranks = get_rank(obs, quantiles)
     plt.figure(figsize=figsize)
     plt.hist(ranks, bins=n_bins)
     plt.hlines(len(ranks) / n_bins, linestyles="dashed", color="black", xmin=0, xmax=101)
     plt.title("Rank Histogram - " + name, fontdict=fontdict_title)
-    plt.show()
+    if path is None:
+        plt.show()
+    else:
+        plt.savefig(path)
 
 
 def generate_forecast_plots(y_true: pd.DataFrame, y_pred: pd.DataFrame, quantile_levels: np.ndarray,
-                            n=None) -> None:
+                            name: str,n=None) -> None:
     q = get_quantiles(y_pred, quantile_levels=quantile_levels)
     if n is None:
         n = y_true.shape[0]
@@ -275,7 +278,7 @@ def generate_forecast_plots(y_true: pd.DataFrame, y_pred: pd.DataFrame, quantile
         plt.vlines(y_true.iloc[i], ymin=quantile_levels.min(), ymax=quantile_levels.max(),
                    label="observation", color="red", linestyles="dashed")
         plt.xlim(left=0.0, right=max(1.0, plt.axis()[1]))
-        plt.title("Forecast " + str(i), fontdict=fontdict_title)
+        plt.title(name+" - Forecast " + str(i), fontdict=fontdict_title)
         plt.legend()
         plt.show()
 
@@ -301,15 +304,12 @@ def preprocess_data(h_pars: dict):
     n_ens = len(ensembles.index.get_level_values(1).unique())
 
     # Split train and test set according to h_pars["train_split"]
-    possible_dates = observations.index.map(lambda d: d.ceil(freq="D")).intersection(\
+    possible_dates = observations.index.map(lambda d: d.ceil(freq="D")).intersection( \
         observations.index.map(lambda d: d.floor(freq="D")))
-    print("Possible dates", possible_dates[0], possible_dates[-1])
-    print("Ensemble index", ensembles.index.get_level_values(0)[0], ensembles.index.get_level_values(0)[-1])
     # round do even hour or stay if horizon =24
     dates = possible_dates.intersection(ensembles.index.get_level_values(0).unique().map(
         lambda d: d - pd.Timedelta(hours=h_pars["horizon"]))).map(
         lambda d: d + pd.Timedelta(hours=h_pars["horizon"]))
-    print("Dates", dates[0], dates[-1])
     n_obs = len(dates)
     n_train = int(len(dates) * h_pars["train_split"])
     # i_train = np.sort(np.random.choice(n_obs, size=n_train, replace=False))  # randomize the train and test set, not nice

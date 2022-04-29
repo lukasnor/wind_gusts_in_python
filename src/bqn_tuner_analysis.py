@@ -2,12 +2,14 @@ import json
 from itertools import product
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 from keras.callbacks import EarlyStopping
 from keras.optimizer_v2 import adam
 
 from bqn import preprocess_data, \
-    format_data, get_model, build_quantile_loss, build_crps_loss3, average_models
+    format_data, get_model, build_quantile_loss, build_crps_loss3, average_models, get_quantiles, \
+    generate_pit_plot, generate_forecast_plots
 
 # For plot formatting
 fontdict_title = {"fontweight": "bold", "fontsize": 24}
@@ -116,7 +118,7 @@ def evaluate_best_hps():
                 model.compile(optimizer=adam.Adam(fixed_params["learning_rate"]),
                               loss=build_quantile_loss(fixed_params["degree"]),
                               metrics=[build_crps_loss3(fixed_params["degree"],
-                                                       obs_min,obs_max)]
+                                                        obs_min, obs_max)]
                               )
                 history = model.fit(x=sc_ens_train_f,
                                     y=sc_obs_train_f,
@@ -142,8 +144,26 @@ def evaluate_best_hps():
 
             average_model = average_models(models)
             average_model.compile(loss=build_crps_loss3(fixed_params["degree"],
-                                                       obs_min, obs_max)
+                                                        obs_min, obs_max)
                                   )
+
+            # Generate plots for average_model
+            train = average_model.predict(sc_ens_train_f, sc_obs_train_f)
+            test = average_model.predict(sc_ens_test_f, sc_obs_test_f)
+            quantiles_train = get_quantiles(train, np.arange(0.0, 1.01, 0.01))
+            quantiles_test = get_quantiles(test, np.arange(0.0, 1.01, 0.01))
+            with plt.xkcd():
+                generate_pit_plot(obs=sc_obs_train_f,
+                                  quantiles=quantiles_train,
+                                  name=horizon + " - " + aggregation + " - Train",
+                                  n_bins=50,
+                                  path="../results/plots/rankhistograms/horizon:" + horizon + "_aggregation:" + aggregation + "_train.png")
+                generate_pit_plot(obs=sc_obs_test_f,
+                                  quantiles=quantiles_test,
+                                  name=horizon + " - " + aggregation + " - Test",
+                                  n_bins=50,
+                                  path="../results/plots/rankhistograms/horizon:" + horizon + "_aggregation:" + aggregation + "_test.png")
+
             evaluation.loc[index, "average"] = average_model.evaluate(x=sc_ens_test_f,
                                                                       y=sc_obs_test_f)
             print(evaluation)
@@ -151,7 +171,7 @@ def evaluate_best_hps():
     evaluation.to_csv("../results/bqn_evaluation.csv")
 
 
-def plot_crps_per_horizon_per_aggregation():
+def plot_crps_per_horizon_per_aggregation(path=None):
     evaluation = pd.read_csv("../results/bqn_evaluation.csv")
     evaluation = evaluation.reset_index().pivot(index=["horizon", "aggregation"], columns=[])
     evaluation = evaluation[evaluation.columns.drop("index")]
@@ -172,7 +192,7 @@ def plot_crps_per_horizon_per_aggregation():
             plt.show()
 
 
-def plot_crps_per_aggregation():
+def plot_crps_per_aggregation(path=None):
     evaluation = pd.read_csv("../results/bqn_evaluation.csv")
     evaluation = evaluation.reset_index().pivot(index=["horizon", "aggregation"], columns=[])
     evaluation = evaluation[evaluation.columns.drop("index")]
@@ -189,7 +209,7 @@ def plot_crps_per_aggregation():
         # plt.savefig("../results/plots/crps_per_aggregation.png")
 
 
-def plot_crps_per_horizon():
+def plot_crps_per_horizon(path=None):
     evaluation = pd.read_csv("../results/bqn_evaluation.csv")
     evaluation = evaluation.reset_index().pivot(index=["horizon", "aggregation"], columns=[])
     evaluation = evaluation[evaluation.columns.drop("index")]

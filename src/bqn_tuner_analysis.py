@@ -156,20 +156,20 @@ def evaluate_best_hps():
             with plt.xkcd():
                 generate_pit_plot(obs=sc_obs_train_f,
                                   quantiles=quantiles_train,
-                                  name=horizon + " - " + aggregation + " - Train",
+                                  name=str(horizon) + " - " + aggregation + " - Train",
                                   n_bins=50,
-                                  path="../results/plots/rankhistograms/horizon:" + horizon + "_aggregation:" + aggregation + "_train.png")
+                                  path="../results/plots/rankhistograms/horizon:" + str(horizon) + "_agg:" + aggregation + "_train.png")
                 generate_pit_plot(obs=sc_obs_test_f,
                                   quantiles=quantiles_test,
                                   name=horizon + " - " + aggregation + " - Test",
                                   n_bins=50,
-                                  path="../results/plots/rankhistograms/horizon:" + horizon + "_aggregation:" + aggregation + "_test.png")
+                                  path="../results/plots/rankhistograms/horizon:" + str(horizon) + "_agg:" + aggregation + "_test.png")
                 generate_forecast_plots(y_true=sc_obs_test_f,
                                         y_pred=test,
                                         quantile_levels=quantile_levels,
-                                        name="Test",
+                                        name="Test - Horizon "+str(horizon)+" - Aggregation "+aggregation,
                                         n=1,
-                                        path="../results/plots/forecasts/horizon:"+"_aggregation:"+aggregation+"_test.png")
+                                        path="../results/plots/forecasts/horizon:"+"_agg:"+aggregation+"_test.png")
             evaluation.loc[index, "average"] = average_model.evaluate(x=sc_ens_test_f,
                                                                       y=sc_obs_test_f)
             print(evaluation)

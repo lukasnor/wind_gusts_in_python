@@ -268,7 +268,7 @@ def generate_pit_plot(obs: pd.DataFrame, quantiles: pd.DataFrame, name: str, n_b
 
 
 def generate_forecast_plots(y_true: pd.DataFrame, y_pred: pd.DataFrame, quantile_levels: np.ndarray,
-                            name: str,n=None) -> None:
+                            name: str, n=None, path=None) -> None:
     q = get_quantiles(y_pred, quantile_levels=quantile_levels)
     if n is None:
         n = y_true.shape[0]
@@ -280,7 +280,10 @@ def generate_forecast_plots(y_true: pd.DataFrame, y_pred: pd.DataFrame, quantile
         plt.xlim(left=0.0, right=max(1.0, plt.axis()[1]))
         plt.title(name+" - Forecast " + str(i), fontdict=fontdict_title)
         plt.legend()
-        plt.show()
+        if path is None:
+            plt.show()
+        else:
+            plt.savefig(path)
 
 
 def preprocess_data(h_pars: dict):

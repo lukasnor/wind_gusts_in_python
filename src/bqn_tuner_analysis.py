@@ -150,8 +150,9 @@ def evaluate_best_hps():
             # Generate plots for average_model
             train = average_model.predict(sc_ens_train_f, sc_obs_train_f)
             test = average_model.predict(sc_ens_test_f, sc_obs_test_f)
-            quantiles_train = get_quantiles(train, np.arange(0.0, 1.01, 0.01))
-            quantiles_test = get_quantiles(test, np.arange(0.0, 1.01, 0.01))
+            quantile_levels =np.arange(0.0, 1.01, 0.01)
+            quantiles_train = get_quantiles(train, quantile_levels)
+            quantiles_test = get_quantiles(test, quantile_levels)
             with plt.xkcd():
                 generate_pit_plot(obs=sc_obs_train_f,
                                   quantiles=quantiles_train,
@@ -163,7 +164,12 @@ def evaluate_best_hps():
                                   name=horizon + " - " + aggregation + " - Test",
                                   n_bins=50,
                                   path="../results/plots/rankhistograms/horizon:" + horizon + "_aggregation:" + aggregation + "_test.png")
-
+                generate_forecast_plots(y_true=sc_obs_test_f,
+                                        y_pred=test,
+                                        quantile_levels=quantile_levels,
+                                        name="Test",
+                                        n=1,
+                                        path="../results/plots/forecasts/horizon:"+"_aggregation:"+aggregation+"_test.png")
             evaluation.loc[index, "average"] = average_model.evaluate(x=sc_ens_test_f,
                                                                       y=sc_obs_test_f)
             print(evaluation)

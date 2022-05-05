@@ -33,7 +33,7 @@ def generate_simple_plot(df, x, y):
     plt.show()
 
 
-def load_hyperparameters_from_folders(path: str = "../results/hps/") -> pd.DataFrame:
+def load_hyperparameters_from_folders(path: str) -> pd.DataFrame:
     hps_list = []
     for horizon, aggregation in product(horizons, aggregations):
         with open(path + "horizon:" + str(horizon) + "_agg:" + str(aggregation) + ".json",
@@ -50,7 +50,7 @@ def load_hyperparameters_from_folders(path: str = "../results/hps/") -> pd.DataF
 
 
 def analysis_by_plots():
-    hyperparameters = load_hyperparameters_from_folders()
+    hyperparameters = load_hyperparameters_from_folders(path="../results/bqn/hps/")
     hyperparameters.info()
     generate_simple_plot(hyperparameters, "horizon", "degree")
     generate_simple_plot(hyperparameters, "degree", "depth")
@@ -62,7 +62,7 @@ def evaluate_best_hps():
     runs = 5
 
     # Import the best hps
-    hps = load_hyperparameters_from_folders()
+    hps = load_hyperparameters_from_folders("../results/bqn/hps/")
     evaluation = pd.DataFrame(index=hps.index,
                               columns=["run" + str(i + 1) for i in range(runs)] + ["average"])
 
@@ -150,7 +150,7 @@ def evaluate_best_hps():
             # Generate plots for average_model
             train = average_model.predict(sc_ens_train_f, sc_obs_train_f)
             test = average_model.predict(sc_ens_test_f, sc_obs_test_f)
-            quantile_levels =np.arange(0.0, 1.01, 0.01)
+            quantile_levels = np.arange(0.0, 1.01, 0.01)
             quantiles_train = get_quantiles(train, quantile_levels)
             quantiles_test = get_quantiles(test, quantile_levels)
             with plt.xkcd():
@@ -158,23 +158,26 @@ def evaluate_best_hps():
                                   quantiles=quantiles_train,
                                   name=str(horizon) + " - " + aggregation + " - Train",
                                   n_bins=50,
-                                  path="../results/plots/rankhistograms/horizon:" + str(horizon) + "_agg:" + aggregation + "_train.png")
+                                  path="../results/bqn/plots/rankhistograms/horizon:" + str(
+                                      horizon) + "_agg:" + aggregation + "_train.png")
                 generate_pit_plot(obs=sc_obs_test_f,
                                   quantiles=quantiles_test,
-                                  name=horizon + " - " + aggregation + " - Test",
+                                  name=str(horizon) + " - " + aggregation + " - Test",
                                   n_bins=50,
-                                  path="../results/plots/rankhistograms/horizon:" + str(horizon) + "_agg:" + aggregation + "_test.png")
+                                  path="../results/bqn/plots/rankhistograms/horizon:" + str(
+                                      horizon) + "_agg:" + aggregation + "_test.png")
                 generate_forecast_plots(y_true=sc_obs_test_f,
                                         y_pred=test,
                                         quantile_levels=quantile_levels,
-                                        name="Test - Horizon "+str(horizon)+" - Aggregation "+aggregation,
+                                        name="Test - Horizon " + str(
+                                            horizon) + " - Aggregation " + aggregation,
                                         n=1,
-                                        path="../results/plots/forecasts/horizon:"+"_agg:"+aggregation+"_test.png")
+                                        path="../results/bqn/plots/forecasts/horizon:" + "_agg:" + aggregation + "_test.png")
             evaluation.loc[index, "average"] = average_model.evaluate(x=sc_ens_test_f,
                                                                       y=sc_obs_test_f)
             print(evaluation)
 
-    evaluation.to_csv("../results/bqn_evaluation.csv")
+    evaluation.to_csv("../results/bqn/bqn_evaluation.csv")
 
 
 def plot_crps_per_horizon_per_aggregation(path=None):
@@ -233,4 +236,4 @@ def plot_crps_per_horizon(path=None):
 
 
 if __name__ == "__main__":
-    print("Hello, World!")
+    evaluate_best_hps()

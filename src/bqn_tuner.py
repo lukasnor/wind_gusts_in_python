@@ -99,7 +99,7 @@ def run_tuner():
                               objective=keras_tuner.Objective('val_crps', direction="min"),
                               max_epochs=125,
                               factor=3,
-                              directory='../results/tuning',
+                              directory='../results/bqn/tuning',
                               project_name="horizon:" + str(horizon) + "_agg:" + str(aggregation))
             stop_early = EarlyStopping(monitor='val_crps', patience=25, restore_best_weights=True)
 
@@ -154,8 +154,8 @@ def run_tuner():
             print(best_hps)
             print(evaluations[best_index])
             # Save the best hps
-            with open("../results/tuning/" + "horizon:" + str(horizon) + "_agg:" + str(
-                    aggregation) + "/best_hps.json", "w") as file:
+            with open("../results/bqn/hps/horizon:" + str(horizon) + "_agg:" + str(
+                    aggregation) + ".json", "w") as file:
                 json.dump(best_hps, file, indent=2)
 
 

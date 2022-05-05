@@ -172,7 +172,8 @@ def evaluate_best_hps():
                                         name="Test - Horizon " + str(
                                             horizon) + " - Aggregation " + aggregation,
                                         n=1,
-                                        path="../results/bqn/plots/forecasts/horizon:" + "_agg:" + aggregation + "_test.png")
+                                        path="../results/bqn/plots/forecasts/horizon:" + str(
+                                            horizon) + "_agg:" + aggregation + "_test.png")
             evaluation.loc[index, "average"] = average_model.evaluate(x=sc_ens_test_f,
                                                                       y=sc_obs_test_f)
             print(evaluation)

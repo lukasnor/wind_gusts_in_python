@@ -148,8 +148,8 @@ def evaluate_best_hps():
                                   )
 
             # Generate plots for average_model
-            train = average_model.predict(sc_ens_train_f, sc_obs_train_f)
-            test = average_model.predict(sc_ens_test_f, sc_obs_test_f)
+            train = pd.DataFrame(average_model.predict(sc_ens_train_f), index=sc_ens_train_f.index)
+            test = pd.DataFrame(average_model.predict(sc_ens_test_f), index=sc_ens_test_f.index)
             quantile_levels = np.arange(0.0, 1.01, 0.01)
             quantiles_train = get_quantiles(train, quantile_levels)
             quantiles_test = get_quantiles(test, quantile_levels)

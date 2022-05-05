@@ -177,11 +177,11 @@ def evaluate_best_hps():
                                                                       y=sc_obs_test_f)
             print(evaluation)
 
-    evaluation.to_csv("../results/bqn/bqn_evaluation.csv")
+    evaluation.to_csv("../results/bqn/crps_evaluation.csv")
 
 
 def plot_crps_per_horizon_per_aggregation(path=None):
-    evaluation = pd.read_csv("../results/bqn_evaluation.csv")
+    evaluation = pd.read_csv("../results/bqn/crps_evaluation.csv")
     evaluation = evaluation.reset_index().pivot(index=["horizon", "aggregation"], columns=[])
     evaluation = evaluation[evaluation.columns.drop("index")]
     for aggregation in aggregations:
@@ -197,12 +197,12 @@ def plot_crps_per_horizon_per_aggregation(path=None):
                       fontdict=fontdict_title)
             plt.xticks(ticks=horizons, labels=horizons)
             plt.xlabel("Horizons", fontdict=fontdict_axis)
-            # plt.savefig("../results/plots/crps_per_horizon_per_aggregation/"+aggregation+".png")
+            # plt.savefig("../results/bqn/plots/crps_per_horizon_per_aggregation/"+aggregation+".png")
             plt.show()
 
 
 def plot_crps_per_aggregation(path=None):
-    evaluation = pd.read_csv("../results/bqn_evaluation.csv")
+    evaluation = pd.read_csv("../results/bqn/crps_evaluation.csv")
     evaluation = evaluation.reset_index().pivot(index=["horizon", "aggregation"], columns=[])
     evaluation = evaluation[evaluation.columns.drop("index")]
     evaluation = evaluation.reset_index().pivot(index="aggregation", columns=["horizon"])
@@ -215,11 +215,11 @@ def plot_crps_per_aggregation(path=None):
         plt.ylabel("CRPS", fontdict=fontdict_axis)
         plt.title("Performance per Aggregation", fontdict=fontdict_title)
         plt.show()
-        # plt.savefig("../results/plots/crps_per_aggregation.png")
+        # plt.savefig("../results/bqn/plots/crps_per_aggregation.png")
 
 
 def plot_crps_per_horizon(path=None):
-    evaluation = pd.read_csv("../results/bqn_evaluation.csv")
+    evaluation = pd.read_csv("../results/bqn/crps_evaluation.csv")
     evaluation = evaluation.reset_index().pivot(index=["horizon", "aggregation"], columns=[])
     evaluation = evaluation[evaluation.columns.drop("index")]
     evaluation = evaluation.reset_index().pivot(index="horizon", columns=["aggregation"])
@@ -232,7 +232,7 @@ def plot_crps_per_horizon(path=None):
         plt.ylabel("CRPS", fontdict=fontdict_axis)
         plt.title("Performance per Horizon", fontdict=fontdict_title)
         plt.show()
-        # plt.savefig("../results/plots/crps_per_horizon.png")
+        # plt.savefig("../results/bqn/plots/crps_per_horizon.png")
 
 
 if __name__ == "__main__":

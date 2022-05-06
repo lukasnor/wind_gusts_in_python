@@ -139,7 +139,7 @@ def run_tuner():
                               callbacks=[stop_early],
                               use_multiprocessing=True,
                               )
-                avg_model = average_models(models)
+                avg_model = average_models(models, name="average_model")
                 avg_model.compile(optimizer=keras.optimizer_v2.adam.Adam(hp["learning_rate"]),
                                   loss=build_quantile_loss(hp["degree"]),
                                   metrics=[build_crps_loss3(hp["degree"], obs_min, obs_max)])

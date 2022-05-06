@@ -77,10 +77,10 @@ def get_averaged_model(name: str, n_input: int, layer_sizes: [int], activations:
 
 
 # For a list of models of same type, construct the average model
-def average_models(models: [Model]) -> Model:
+def average_models(models: [Model], name) -> Model:
     common_input = layers.Input(name="common_input", shape=models[0].input.shape[1])
     average_output = layers.Average(name="average")([model(common_input) for model in models])
-    return Model(name="average_model", inputs=common_input, outputs=average_output)
+    return Model(name=name, inputs=common_input, outputs=average_output)
 
 
 # Construction of the loss function
@@ -502,7 +502,7 @@ if __name__ == "__main__":
     # Averaging the models
     for model in models:
         model.trainable = False
-    average_model = average_models(models)
+    average_model = average_models(models, name="average_model")
     average_model.compile(loss=build_crps_loss3(h_pars["degree"], obs_min, obs_max),
                           optimizer="adam")
     # Evaluate the averaged model

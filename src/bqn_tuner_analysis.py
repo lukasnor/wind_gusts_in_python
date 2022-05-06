@@ -142,7 +142,7 @@ def evaluate_best_hps():
                 print(evaluation)
                 models.append(model)
 
-            average_model = average_models(models)
+            average_model = average_models(models, name=str(horizon)+aggregation)
             average_model.compile(loss=build_crps_loss3(fixed_params["degree"],
                                                         obs_min, obs_max)
                                   )
@@ -177,11 +177,14 @@ def evaluate_best_hps():
             evaluation.loc[index, "average"] = average_model.evaluate(x=sc_ens_test_f,
                                                                       y=sc_obs_test_f)
             print(evaluation)
+            # Make model persistent for future evaluation
+            average_model.save(
+                "../results/bqn/models/horizon:" + str(horizon) + "_agg:" + aggregation + ".h5")
 
     evaluation.to_csv("../results/bqn/crps_evaluation.csv")
 
 
-def plot_crps_per_horizon_per_aggregation(path=None):
+def plot_crps_per_horizon_per_aggregation(plots_path=None):
     evaluation = pd.read_csv("../results/bqn/crps_evaluation.csv")
     evaluation = evaluation.reset_index().pivot(index=["horizon", "aggregation"], columns=[])
     evaluation = evaluation[evaluation.columns.drop("index")]
@@ -198,11 +201,13 @@ def plot_crps_per_horizon_per_aggregation(path=None):
                       fontdict=fontdict_title)
             plt.xticks(ticks=horizons, labels=horizons)
             plt.xlabel("Horizons", fontdict=fontdict_axis)
-            # plt.savefig("../results/bqn/plots/crps_per_horizon_per_aggregation/"+aggregation+".png")
-            plt.show()
+            if plots_path is None:
+                plt.show()
+            else:
+                plt.savefig(plots_path + "crps_per_horizon_per_aggregation/" + aggregation + ".png")
 
 
-def plot_crps_per_aggregation(path=None):
+def plot_crps_per_aggregation(plots_path=None):
     evaluation = pd.read_csv("../results/bqn/crps_evaluation.csv")
     evaluation = evaluation.reset_index().pivot(index=["horizon", "aggregation"], columns=[])
     evaluation = evaluation[evaluation.columns.drop("index")]
@@ -215,11 +220,13 @@ def plot_crps_per_aggregation(path=None):
         plt.xlabel("Aggregations", fontdict=fontdict_axis)
         plt.ylabel("CRPS", fontdict=fontdict_axis)
         plt.title("Performance per Aggregation", fontdict=fontdict_title)
-        plt.show()
-        # plt.savefig("../results/bqn/plots/crps_per_aggregation.png")
+        if plots_path is None:
+            plt.show()
+        else:
+            plt.savefig(plots_path + "crps_per_aggregation.png")
 
 
-def plot_crps_per_horizon(path=None):
+def plot_crps_per_horizon(plots_path=None):
     evaluation = pd.read_csv("../results/bqn/crps_evaluation.csv")
     evaluation = evaluation.reset_index().pivot(index=["horizon", "aggregation"], columns=[])
     evaluation = evaluation[evaluation.columns.drop("index")]
@@ -232,9 +239,15 @@ def plot_crps_per_horizon(path=None):
         plt.xlabel("Horizons", fontdict=fontdict_axis)
         plt.ylabel("CRPS", fontdict=fontdict_axis)
         plt.title("Performance per Horizon", fontdict=fontdict_title)
-        plt.show()
-        # plt.savefig("../results/bqn/plots/crps_per_horizon.png")
+        if plots_path is None:
+            plt.show()
+        else:
+            plt.savefig(plots_path + "crps_per_horizon.png")
 
 
 if __name__ == "__main__":
+    # plots_path = "../results/bqn/plots/"
+    # plot_crps_per_horizon_per_aggregation(plots_path)
+    # plot_crps_per_horizon(plots_path)
+    # plot_crps_per_aggregation(plots_path)
     evaluate_best_hps()

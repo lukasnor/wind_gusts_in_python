@@ -142,7 +142,7 @@ def evaluate_best_hps():
                 print(evaluation)
                 models.append(model)
 
-            average_model = average_models(models, name=str(horizon)+aggregation)
+            average_model = average_models(models, name="average_model")
             average_model.compile(loss=build_crps_loss3(fixed_params["degree"],
                                                         obs_min, obs_max)
                                   )

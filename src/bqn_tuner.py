@@ -22,7 +22,7 @@ def powerset(list):
 horizons = [3, 6, 9, 12, 15, 18, 21, 24]
 variables = ["u100", "v100", "t2m", "sp", "speed"]
 variable_selections = [variables]  # or =  list(powerset(variables))[1:]
-aggregations = ["single", "single+std", "mean+std", "all"]
+aggregations = ["single", "single+std", "mean+std","mean", "all"]
 fixed_params_selections = [{"horizon": a, "variables": b, "aggregation": c} for a, b, c in
                            product(horizons, variable_selections, aggregations)]
 

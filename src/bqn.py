@@ -383,8 +383,8 @@ def format_data(h_pars: dict, sc_ens_train, sc_ens_test, sc_obs_train, sc_obs_te
         sc_ens_test_f = sc_ens_test.groupby(level=0).agg(["mean"])
         sc_obs_train_f = sc_obs_train
         sc_obs_test_f = sc_obs_test
-    if h_pars[
-        "aggregation"] == "mean+std":  # mean the ensembles for each feature and add standard deviation
+    elif h_pars["aggregation"] == "mean+std":
+        # mean the ensembles for each feature and add standard deviation
         sc_ens_train_f = sc_ens_train.groupby(level=0).agg(["mean", "std"])
         sc_ens_test_f = sc_ens_test.groupby(level=0).agg(["mean", "std"])
         sc_obs_train_f = sc_obs_train

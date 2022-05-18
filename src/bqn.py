@@ -250,16 +250,38 @@ def get_quantiles(y_pred: pd.DataFrame, quantile_levels: np.ndarray) -> pd.DataF
 
 
 # Calculate the rank of the observation in the quantile forecast
-def get_rank(obs: pd.DataFrame, quantiles: pd.DataFrame) -> pd.DataFrame:
-    return pd.concat([obs, quantiles], axis=1).rank(axis=1).iloc[:, 0]
+def get_rank(obs: pd.DataFrame, quantiles: pd.DataFrame) -> pd.Series:
+    return pd.concat([obs, quantiles], axis=1).rank(axis=1).iloc[:, 0].rename("rank").astype("int")
 
 
-def generate_pit_plot(obs: pd.DataFrame, quantiles: pd.DataFrame, name: str, n_bins: int,
-                      path=None) -> None:
+def generate_histogram_plot(obs: pd.DataFrame, f: pd.DataFrame, name: str, bins: int = 10,
+                            path: str = None) -> None:
+    if bins < 2:
+        raise Exception(
+            "More than one bin is necessary for a sensable rank histogram. 'bins' = " + str(bins))
+    quantile_levels = np.linspace(1 / bins, 1, bins - 1, False)  # Quantile levels / inner bin walls
+    quantiles = get_quantiles(f, quantile_levels)
     ranks = get_rank(obs, quantiles)
     plt.figure(figsize=figsize)
-    plt.hist(ranks, bins=n_bins)
-    plt.hlines(len(ranks) / n_bins, linestyles="dashed", color="black", xmin=0, xmax=101)
+    plt.hist(ranks, bins=np.arange(0.5, bins + 1), weights=np.ones_like(ranks) / ranks.size)
+    plt.hlines(1 / bins, linestyles="dashed", color="grey", xmin=0.5, xmax=bins + 0.5)
+    plt.xlabel("Ranks", fontdict=fontdict_axis)
+    plt.xticks(np.arange(1, bins + 1), np.arange(1, bins + 1))
+    plt.title(name, fontdict=fontdict_title)
+    if path is None:
+        plt.show()
+    else:
+        plt.savefig(path)
+
+
+def generate_pit_plot(obs: pd.DataFrame, quantiles: pd.DataFrame, name: str, n_bins: int = 10,
+                      path: str = None) -> None:
+    ranks = get_rank(obs, quantiles)
+    plt.figure(figsize=figsize)
+    plt.hist(ranks, bins=n_bins, weights=np.ones_like(ranks) / ranks.size)
+    plt.hlines(1 / n_bins, linestyles="dashed", color="grey", xmin=0,
+               xmax=len(quantiles.columns) + 1)
+    plt.xlabel("Ranks", fontdict=fontdict_axis)
     plt.title("Rank Histogram - " + name, fontdict=fontdict_title)
     if path is None:
         plt.show()
@@ -268,7 +290,7 @@ def generate_pit_plot(obs: pd.DataFrame, quantiles: pd.DataFrame, name: str, n_b
 
 
 def generate_forecast_plots(y_true: pd.DataFrame, y_pred: pd.DataFrame, quantile_levels: np.ndarray,
-                            name: str, n=None, path=None) -> None:
+                            name: str, n=None, path: str = None) -> None:
     q = get_quantiles(y_pred, quantile_levels=quantile_levels)
     if n is None:
         n = y_true.shape[0]
@@ -278,7 +300,7 @@ def generate_forecast_plots(y_true: pd.DataFrame, y_pred: pd.DataFrame, quantile
         plt.vlines(y_true.iloc[i], ymin=quantile_levels.min(), ymax=quantile_levels.max(),
                    label="observation", color="red", linestyles="dashed")
         plt.xlim(left=0.0, right=max(1.0, plt.axis()[1]))
-        plt.title(name+" - Forecast " + str(i), fontdict=fontdict_title)
+        plt.title(name + " - Forecast " + str(i), fontdict=fontdict_title)
         plt.legend()
         if path is None:
             plt.show()
@@ -361,7 +383,8 @@ def format_data(h_pars: dict, sc_ens_train, sc_ens_test, sc_obs_train, sc_obs_te
         sc_ens_test_f = sc_ens_test.groupby(level=0).agg(["mean"])
         sc_obs_train_f = sc_obs_train
         sc_obs_test_f = sc_obs_test
-    if h_pars["aggregation"] == "mean+std":  # mean the ensembles for each feature and add standard deviation
+    if h_pars[
+        "aggregation"] == "mean+std":  # mean the ensembles for each feature and add standard deviation
         sc_ens_train_f = sc_ens_train.groupby(level=0).agg(["mean", "std"])
         sc_ens_test_f = sc_ens_test.groupby(level=0).agg(["mean", "std"])
         sc_obs_train_f = sc_obs_train
@@ -412,17 +435,17 @@ def format_data(h_pars: dict, sc_ens_train, sc_ens_test, sc_obs_train, sc_obs_te
 
 if __name__ == "__main__":
     # Get the data in a processed form
-    h_pars = {"horizon": 9,  #
+    h_pars = {"horizon": 3,  #
               "variables": None,
               "train_split": 0.85,
 
-              "aggregation": "all",
+              "aggregation": "mean+std",
               "degree": 12,
               "layer_sizes": [20, 15],
               "activations": ["selu", "selu", "selu"],
 
               "batch_size": 25,
-              "patience": 27,
+              "patience": 50,
               }
     # Default value for activation is "selu" if activations do not match layer_sizes
     if h_pars["activations"] is None or \
@@ -447,7 +470,7 @@ if __name__ == "__main__":
 
     # Average over models
     models = []
-    for i in range(2):
+    for i in range(5):
         # Build model
         model = get_model(name="Foo" + str(i),
                           input_size=len(sc_ens_train_f.columns),
@@ -488,17 +511,17 @@ if __name__ == "__main__":
 
         # Evaluate model
         train = pd.DataFrame(model.predict(sc_ens_train_f), index=sc_ens_train_f.index)
+        # Newer and better histogram plot
         with plt.xkcd():
-            generate_pit_plot(sc_obs_train_f, get_quantiles(train, np.arange(0.0, 1.01, 0.01)),
-                              "Rank Histogram for horizon " + str(h_pars["horizon"]),
-                              n_bins=50)
+            generate_histogram_plot(sc_obs_train_f, train, "Rank Histogram of Training data", 21)
         test = pd.DataFrame(model.predict(sc_ens_test_f), index=sc_ens_test_f.index)
+        # Forecast plots
         with plt.xkcd():
-            generate_forecast_plots(sc_obs_test_f[::51], test[::51],
-                                    quantile_levels=np.arange(0.0, 1.01, 0.01), n=5)
+            generate_forecast_plots(sc_obs_test_f[::51], test[::51], name="Forecast Plot",
+                                    quantile_levels=np.arange(0.0, 1.01, 0.01), n=1)
+        # Test data forecast plots
         with plt.xkcd():
-            generate_pit_plot(sc_obs_test_f, get_quantiles(test, np.arange(0.0, 1.01, 0.01)),
-                              "Horizon " + str(h_pars["horizon"]), n_bins=50)
+            generate_histogram_plot(sc_obs_test_f, test, "Rank Histogram of Test data", 21)
         models.append(model)
 
     if len(models) == 1:
@@ -514,6 +537,7 @@ if __name__ == "__main__":
     average_model.evaluate(x=sc_ens_test_f, y=sc_obs_test_f)
     test = pd.DataFrame(average_model.predict(sc_ens_test_f), index=sc_ens_test_f.index)
     with plt.xkcd():
-        generate_pit_plot(sc_obs_test_f, get_quantiles(test, np.arange(0.0, 1.01, 0.01)),
-                          "Test data\n" + "Horizon " + str(h_pars["horizon"]) + " - Aggregation " +
-                          h_pars["aggregation"], n_bins=50)
+        generate_histogram_plot(sc_obs_test_f, test,
+                                "Rank Histogram - Test data\n" + "Horizon " + str(
+                                    h_pars["horizon"]) + " - Aggregation " + h_pars["aggregation"],
+                                21)

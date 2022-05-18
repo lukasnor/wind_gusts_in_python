@@ -8,12 +8,13 @@ from keras.callbacks import EarlyStopping
 from keras.optimizer_v2 import adam
 
 from bqn import preprocess_data, \
-    format_data, get_model, build_quantile_loss, build_crps_loss3, average_models, get_quantiles, \
-    generate_pit_plot, generate_forecast_plots
+    format_data, get_model, build_quantile_loss, build_crps_loss3, average_models, \
+    generate_forecast_plots, generate_histogram_plot
 
 # For plot formatting
 fontdict_title = {"fontweight": "bold", "fontsize": 24}
 fontdict_axis = {"fontweight": "bold", "fontsize": 15}
+figsize = (13, 7)
 
 horizons = [3, 6, 9, 12, 15, 18, 21, 24]
 aggregations = ["single", "single+std", "mean+std", "all"]
@@ -42,11 +43,7 @@ def load_hyperparameters_from_folders(path: str) -> pd.DataFrame:
             hps_list.append(json.load(file))
 
     hps = pd.DataFrame(hps_list)
-    hps = hps.pivot(index=["horizon", "aggregation"],
-                    # columns=["input_size", "batch_size", "learning_rate", "activation", "degree", "depth",
-                    #          "layer0_size",
-                    #          "layer1_size", "layer2_size", "layer3_size", "layer4_size"])
-                    columns=[])
+    hps = hps.pivot(index=["horizon", "aggregation"], columns=[])
     return hps
 
 
@@ -152,23 +149,25 @@ def evaluate_best_hps():
             train = pd.DataFrame(average_model.predict(sc_ens_train_f), index=sc_ens_train_f.index)
             test = pd.DataFrame(average_model.predict(sc_ens_test_f), index=sc_ens_test_f.index)
             quantile_levels = np.arange(0.0, 1.01, 0.01)
-            quantiles_train = get_quantiles(train, quantile_levels)
-            quantiles_test = get_quantiles(test, quantile_levels)
             with plt.xkcd():
-                generate_pit_plot(obs=sc_obs_train_f,
-                                  quantiles=quantiles_train,
-                                  name=str(horizon) + " - " + aggregation + " - Train",
-                                  n_bins=50,
-                                  path="../results/bqn/plots/rankhistograms/horizon:" + str(
-                                      horizon) + "_agg:" + aggregation + "_train.png")
-                generate_pit_plot(obs=sc_obs_test_f,
-                                  quantiles=quantiles_test,
-                                  name=str(horizon) + " - " + aggregation + " - Test",
-                                  n_bins=50,
-                                  path="../results/bqn/plots/rankhistograms/horizon:" + str(
-                                      horizon) + "_agg:" + aggregation + "_test.png")
-                generate_forecast_plots(y_true=sc_obs_test_f,
-                                        y_pred=test,
+                generate_histogram_plot(obs=sc_obs_train_f,
+                                        f=train,
+                                        name="Rank Histogram - " + str(
+                                            horizon) + " - " + aggregation + " - Train",
+                                        bins=21,
+                                        path="../results/bqn/plots/rankhistograms/horizon:" + str(
+                                            horizon) + "_agg:" + aggregation + "_train.png"
+                                        )
+                generate_histogram_plot(obs=sc_obs_test_f,
+                                        f=test,
+                                        name="Rank Histogram - " + str(
+                                            horizon) + " - " + aggregation + " - Test",
+                                        bins=21,
+                                        path="../results/bqn/plots/rankhistograms/horizon:" + str(
+                                            horizon) + "_agg:" + aggregation + "_test.png"
+                                        )
+                generate_forecast_plots(y_true=sc_obs_test_f[::51],
+                                        y_pred=test[::51],
                                         quantile_levels=quantile_levels,
                                         name="Test - Horizon " + str(
                                             horizon) + " - Aggregation " + aggregation,
@@ -178,6 +177,7 @@ def evaluate_best_hps():
             evaluation.loc[index, "average"] = average_model.evaluate(x=sc_ens_test_f,
                                                                       y=sc_obs_test_f)
             print(evaluation)
+
             # Make model persistent for future evaluation
             average_model.save(
                 "../results/bqn/models/horizon:" + str(horizon) + "_agg:" + aggregation + ".h5")
@@ -191,7 +191,7 @@ def plot_crps_per_horizon_per_aggregation(plots_path=None):
     evaluation = evaluation[evaluation.columns.drop("index")]
     for aggregation in aggregations:
         with plt.xkcd():
-            plt.figure(figsize=(13, 7))
+            plt.figure(figsize=figsize)
             plt.scatter([[horizon for _ in range(5)] for horizon in horizons],
                         evaluation.loc[(slice(None), aggregation), :"run5"].values, c="blue",
                         label="individual")
@@ -214,7 +214,7 @@ def plot_crps_per_aggregation(plots_path=None):
     evaluation = evaluation[evaluation.columns.drop("index")]
     evaluation = evaluation.reset_index().pivot(index="aggregation", columns=["horizon"])
     with plt.xkcd():
-        plt.figure(figsize=(13, 7))
+        plt.figure(figsize=figsize)
         plt.boxplot(evaluation.values.transpose())
         locs, _ = plt.xticks()
         plt.xticks(ticks=locs, labels=evaluation.index)
@@ -233,7 +233,7 @@ def plot_crps_per_horizon(plots_path=None):
     evaluation = evaluation[evaluation.columns.drop("index")]
     evaluation = evaluation.reset_index().pivot(index="horizon", columns=["aggregation"])
     with plt.xkcd():
-        plt.figure(figsize=(13, 7))
+        plt.figure(figsize=figsize)
         plt.boxplot(evaluation.values.transpose())
         locs, _ = plt.xticks()
         plt.xticks(ticks=locs, labels=evaluation.index)
@@ -247,8 +247,8 @@ def plot_crps_per_horizon(plots_path=None):
 
 
 if __name__ == "__main__":
-    # plots_path = "../results/bqn/plots/"
+    plots_path = "../results/bqn/plots/"
     # plot_crps_per_horizon_per_aggregation(plots_path)
     # plot_crps_per_horizon(plots_path)
     # plot_crps_per_aggregation(plots_path)
-    evaluate_best_hps()
+    # evaluate_best_hps()

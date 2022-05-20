@@ -248,16 +248,18 @@ def plot_crps_per_horizon(plots_path=None):
 
 # This does not work since each model needs its own custom loss function which must be registered beforehand
 def load_models() -> dict:
-    models = {(horizon, aggregation): keras.models.load_model("../results/bqn/models/horizon:" + str(horizon)
-                                                              + "_agg:" + aggregation + ".h5")
-              for (horizon, aggregation) in product(horizons, aggregations)}
+    models = {(horizon, aggregation): keras.models.load_model(
+        "../results/bqn/models/horizon:" + str(horizon)
+        + "_agg:" + aggregation + ".h5")
+        for (horizon, aggregation) in product(horizons, aggregations)}
     return models
 
 
 # Instead load each model individually
 def load_model(horizon, aggregation, crps) -> keras.Model:
-    return keras.models.load_model("../results/bqn/models/horizon:" + str(horizon) + "_agg:" + aggregation + ".h5",
-                                   custom_objects={"crps": crps})
+    return keras.models.load_model(
+        "../results/bqn/models/horizon:" + str(horizon) + "_agg:" + aggregation + ".h5",
+        custom_objects={"crps": crps})
 
 
 def plot_rank_histograms_and_forecasts(plots_path=None):
@@ -306,11 +308,53 @@ def plot_rank_histograms_and_forecasts(plots_path=None):
                                         path=plots_path + "rankhistograms/horizon:" + str(
                                             horizon) + "_agg:" + aggregation + "_test.png" if plots_path is not None else None
                                         )
-                generate_forecast_plots(sc_obs_test_f[::51], test[::51], name="Example Forecast Plot",
+                generate_forecast_plots(sc_obs_test_f[::51], test[::51],
+                                        name="Example Forecast Plot",
                                         quantile_levels=np.arange(0, 1.01, 0.01), n=1,
                                         path=plots_path + "forecasts/horizon:" + str(
                                             horizon) + "_agg:" + aggregation + ".png" if plots_path is not None else None
                                         )
+
+
+def analyze_first_coefficient(plots_path=None):
+    hps = load_hyperparameters_from_folders("../results/bqn/hps/")
+    fixed_params = {"variables": variables, "train_split": 0.85}
+    coeffs = pd.DataFrame(index=horizons, columns=aggregations)
+    for horizon in horizons:
+        fixed_params["horizon"] = horizon
+        # Import data
+        sc_ens_train, sc_ens_test, sc_obs_train, sc_obs_test, scale_dict \
+            = preprocess_data(fixed_params)
+        obs_scaler = scale_dict["wind_power"]
+        obs_max = obs_scaler.data_max_
+        obs_min = obs_scaler.data_min_
+
+        for aggregation in aggregations:
+            index = (horizon, aggregation)
+            degree = hps.loc[index, "degree"]
+            crps = build_crps_loss3(degree, obs_min, obs_max)
+            model = load_model(horizon, aggregation, crps)
+            fixed_params["aggregation"] = aggregation
+
+            (sc_ens_train_f,
+             sc_ens_test_f,
+             sc_obs_train_f,
+             sc_obs_test_f) = format_data(fixed_params,
+                                          sc_ens_train,
+                                          sc_ens_test,
+                                          sc_obs_train,
+                                          sc_obs_test)
+            test = pd.DataFrame(model.predict(sc_ens_test_f), index=sc_obs_test_f.index)
+            coeffs.loc[index] = test[0].mean()
+    with plt.xkcd():
+        coeffs.plot(figsize=figsize)
+        plt.xticks(horizons)
+        plt.xlabel("Horizon", fontdict=fontdict_axis)
+        plt.title("Average first coefficients", fontdict=fontdict_title)
+        if plots_path is None:
+            plt.show()
+        else:
+            plt.savefig(plots_path + "first_coeffs.png")
 
 
 if __name__ == "__main__":
@@ -320,3 +364,4 @@ if __name__ == "__main__":
     # plot_crps_per_horizon(plots_path)
     # plot_crps_per_aggregation(plots_path)
     # evaluate_best_hps()
+    # analyze_first_coefficient(plots_path)

@@ -1,6 +1,7 @@
 import json
 from itertools import product
 
+import keras.models
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -17,8 +18,7 @@ fontdict_axis = {"fontweight": "bold", "fontsize": 15}
 figsize = (13, 7)
 
 horizons = [3, 6, 9, 12, 15, 18, 21, 24]
-aggregations = ["single", "single+std", "mean+std", "all"]
-# aggregations = ["single", "single+std", "mean+std","mean", "all"]
+aggregations = ["single", "single+std", "mean+std", "mean", "all"]
 variables = ["u100", "v100", "t2m", "sp", "speed"]
 variable_selections = [variables]  # or =  list(powerset(variables))[1:]
 fixed_params_selections = [{"horizon": a, "variables": b, "aggregation": c} for a, b, c in
@@ -246,8 +246,76 @@ def plot_crps_per_horizon(plots_path=None):
             plt.savefig(plots_path + "crps_per_horizon.png")
 
 
+# This does not work since each model needs its own custom loss function which must be registered beforehand
+def load_models() -> dict:
+    models = {(horizon, aggregation): keras.models.load_model("../results/bqn/models/horizon:" + str(horizon)
+                                                              + "_agg:" + aggregation + ".h5")
+              for (horizon, aggregation) in product(horizons, aggregations)}
+    return models
+
+
+# Instead load each model individually
+def load_model(horizon, aggregation, crps) -> keras.Model:
+    return keras.models.load_model("../results/bqn/models/horizon:" + str(horizon) + "_agg:" + aggregation + ".h5",
+                                   custom_objects={"crps": crps})
+
+
+def plot_rank_histograms_and_forecasts(plots_path=None):
+    hps = load_hyperparameters_from_folders("../results/bqn/hps/")
+    fixed_params = {"variables": variables, "train_split": 0.85}
+    for horizon in horizons:
+        fixed_params["horizon"] = horizon
+        # Import data
+        sc_ens_train, sc_ens_test, sc_obs_train, sc_obs_test, scale_dict \
+            = preprocess_data(fixed_params)
+        obs_scaler = scale_dict["wind_power"]
+        obs_max = obs_scaler.data_max_
+        obs_min = obs_scaler.data_min_
+
+        for aggregation in aggregations:
+            index = (horizon, aggregation)
+            degree = hps.loc[index, "degree"]
+            crps = build_crps_loss3(degree, obs_min, obs_max)
+            model = load_model(horizon, aggregation, crps)
+            fixed_params["aggregation"] = aggregation
+
+            (sc_ens_train_f,
+             sc_ens_test_f,
+             sc_obs_train_f,
+             sc_obs_test_f) = format_data(fixed_params,
+                                          sc_ens_train,
+                                          sc_ens_test,
+                                          sc_obs_train,
+                                          sc_obs_test)
+            train = pd.DataFrame(model.predict(sc_ens_train_f), index=sc_ens_train_f.index)
+            test = pd.DataFrame(model.predict(sc_ens_test_f), index=sc_obs_test_f.index)
+            with plt.xkcd():
+                generate_histogram_plot(sc_obs_train_f,
+                                        train,
+                                        "Rank Histogram - Train data\n Horizon " + str(horizon) +
+                                        " - Aggregation " + aggregation,
+                                        21,
+                                        path=plots_path + "rankhistograms/horizon:" + str(
+                                            horizon) + "_agg:" + aggregation + "_train.png" if plots_path is not None else None
+                                        )
+                generate_histogram_plot(sc_obs_test_f,
+                                        test,
+                                        "Rank Histogram - Test data\n Horizon " + str(horizon) +
+                                        " - Aggregation " + aggregation,
+                                        21,
+                                        path=plots_path + "rankhistograms/horizon:" + str(
+                                            horizon) + "_agg:" + aggregation + "_test.png" if plots_path is not None else None
+                                        )
+                generate_forecast_plots(sc_obs_test_f[::51], test[::51], name="Example Forecast Plot",
+                                        quantile_levels=np.arange(0, 1.01, 0.01), n=1,
+                                        path=plots_path + "forecasts/horizon:" + str(
+                                            horizon) + "_agg:" + aggregation + ".png" if plots_path is not None else None
+                                        )
+
+
 if __name__ == "__main__":
     plots_path = "../results/bqn/plots/"
+    plot_rank_histograms_and_forecasts()
     # plot_crps_per_horizon_per_aggregation(plots_path)
     # plot_crps_per_horizon(plots_path)
     # plot_crps_per_aggregation(plots_path)

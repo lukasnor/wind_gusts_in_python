@@ -21,37 +21,13 @@ def plot_wind_power_data(plots_path=None):
 
 
 def plot_wind_power_data_split(plots_path=None):
-    h_pars = {"horizon": 3, "variables": ["sp"], "train_split": 0.85}
-    # Import observation data
-    observations = pd.read_csv("../data/Sweden_Zone3_Power.csv", index_col=0)
-    observations.index = pd.to_datetime(observations.index, infer_datetime_format=True)
-    observations = observations[observations.columns.drop("horizon")]
-
-    # Import ensemble data
-    ensembles = pd.read_csv("../data/Sweden_Zone3_Ensembles.csv")
-    ensembles["time"] = pd.to_datetime(ensembles["time"], infer_datetime_format=True)
-    ensembles = ensembles.reset_index().pivot(index=["horizon", "time", "number"], columns=[])
-    # variables = ensembles.columns.drop(["is_origin", "index"])  # Not needed anymore
-    ensembles = ensembles[h_pars["variables"]]
-    # Select only relevant horizon
-    ensembles = ensembles.sort_index(level=[0, 1, 2])
-    ensembles = ensembles.loc[(h_pars["horizon"], slice(None), slice(None))]
-    ensembles.index = ensembles.index.droplevel(0)
-    # Split train and test set according to h_pars["train_split"]
-    possible_dates = observations.index.map(lambda d: d.ceil(freq="D")).intersection( \
-        observations.index.map(lambda d: d.floor(freq="D")))
-    # round do even hour or stay if horizon =24
-    dates = possible_dates.intersection(ensembles.index.get_level_values(0).unique().map(
-        lambda d: d - pd.Timedelta(hours=h_pars["horizon"]))).map(
-        lambda d: d + pd.Timedelta(hours=h_pars["horizon"]))
-    n_obs = len(dates)
-    n_train = int(len(dates) * h_pars["train_split"])
-    i_train = np.arange(0, n_train)
-    i_test = np.arange(n_train, n_obs)
-    dates_train = dates[i_train]
-    dates_test = dates[i_test]
-    obs_train = observations.loc[dates_train]
-    obs_test = observations.loc[dates_test]
+    observations = pd.read_csv("../data/Sweden_Zone3_Power.csv", index_col=0,
+                               infer_datetime_format=True)
+    observations = observations[observations.columns.drop(["horizon"])]
+    observations = observations.sort_index()
+    split_index = int(len(observations) * 0.85)
+    obs_train = observations.iloc[:split_index]
+    obs_test = observations.iloc[split_index:]
     with plt.xkcd():
         obs_train.hist(figsize=figsize, bins=50, grid=False)
         plt.title("Wind Power Histogram - Train", fontdict=fontdict_title)
@@ -84,5 +60,5 @@ def whatever():
 
 
 if __name__ == "__main__":
-    #plot_wind_power_data(plots_path="../results/data analysis/wind_power_histogram.png")
+    # plot_wind_power_data(plots_path="../results/data analysis/wind_power_histogram.png")
     plot_wind_power_data_split(plots_path="../results/data analysis/")

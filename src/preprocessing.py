@@ -25,7 +25,7 @@ def unscale(data: pd.DataFrame, scaler_dict) -> pd.DataFrame:
                       index=data.index, columns=[name]) for name in data.columns], axis=1)
 
 
-def preprocess_data(h_pars: dict):
+def import_data(h_pars: dict):
     # h_pars must contain keys "horizon", "variables", "train_split"
 
     # Import observation data
@@ -71,6 +71,14 @@ def preprocess_data(h_pars: dict):
     obs_train = observations.loc[dates_train]
     obs_test = observations.loc[dates_test]
 
+    return ens_train, ens_test, obs_train, obs_test
+
+
+def scale_data(ens_train: pd.DataFrame,
+               ens_test: pd.DataFrame,
+               obs_train: pd.DataFrame,
+               obs_test: pd.DataFrame):
+
     # Define scaler types for each variable
     scale_dict = {"u100": StandardScaler(), "v100": StandardScaler(), "t2m": StandardScaler(),
                   "sp": StandardScaler(),
@@ -91,6 +99,11 @@ def preprocess_data(h_pars: dict):
                                columns=obs_test.columns)
     # Return the processed data
     return sc_ens_train, sc_ens_test, sc_obs_train, sc_obs_test, scale_dict
+
+
+# First import, then scale
+def preprocess_data(h_pars):
+    return scale_data(*import_data(h_pars))
 
 
 # Reformat data depending on level of aggregation in h_pars["aggregation"]

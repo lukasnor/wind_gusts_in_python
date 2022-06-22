@@ -6,8 +6,10 @@ import keras_tuner
 from keras.callbacks import EarlyStopping
 from keras_tuner import Hyperband
 
-from bqn import preprocess_data, format_data, build_quantile_loss, build_crps_loss3, get_model, \
+from bqn import build_quantile_loss, build_crps_loss3, get_model, \
     average_models
+from src.preprocessing import preprocess_data, format_data
+
 
 # Returns all sublists of list
 def powerset(list):

@@ -10,7 +10,7 @@ from keras import layers, Model
 from keras.callbacks import EarlyStopping
 from sklearn.preprocessing import StandardScaler
 from keras.initializers import initializers_v2 as inits
-from src.bqn import preprocess_data, format_data
+from src.preprocessing import preprocess_data, format_data
 
 # For plot formatting
 fontdict_title = {"fontweight": "bold", "fontsize": 24}

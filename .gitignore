@@ -1,5 +1,6 @@
 *.venv
 *.idea
+*.log
 pywatts.log
 data/
 src/pywatts.log

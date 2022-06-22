@@ -8,9 +8,9 @@ import pandas as pd
 from keras.callbacks import EarlyStopping
 from keras.optimizer_v2 import adam
 
-from bqn import preprocess_data, \
-    format_data, get_model, build_quantile_loss, build_crps_loss3, average_models, \
+from bqn import get_model, build_quantile_loss, build_crps_loss3, average_models, \
     generate_forecast_plots, generate_histogram_plot
+from src.preprocessing import preprocess_data, format_data
 
 # For plot formatting
 fontdict_title = {"fontweight": "bold", "fontsize": 24}

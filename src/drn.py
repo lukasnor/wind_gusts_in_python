@@ -23,6 +23,10 @@ tfd = tfp.distributions
 Gamma = lambda x: tf.math.exp(tf.math.lgamma(x))
 
 
+def custom_mae(y_true, y_pred):
+    return tf.keras.metrics.mean_absolute_error(y_true, y_pred[:, 0])
+
+
 # Custom loss function / crps of a truncated logistic distribution, short version of the R
 # code in scoringRules package
 def crps_logistic_loss(y_true, y_pred):
@@ -135,20 +139,61 @@ def get_drn_model(name: str, input_size: int, layer_sizes: [int], activations: [
     return Model(name=name, inputs=input, outputs=output)
 
 
+def get_base_logistic_model(name: str, input_size: int, layer_sizes: [int], activations: [str]) -> Model:
+    # Inputs
+    input = layers.Input(shape=input_size, name="input")
+
+    # Hidden layers
+    x = layers.Dense(units=layer_sizes[0], activation=activations[0], name="hidden0")(input)
+    for i in range(len(layer_sizes) - 1):
+        x = layers.Dense(units=layer_sizes[i + 1], activation=activations[i + 1],
+                         name="hidden" + str(i + 1))(x)
+
+    # Output, size 2 for location and scale
+    location = layers.Dense(name="output", units=1, activation="softplus")(
+        x)  # smooth, non-negative and proportional
+    output = layers.Concatenate()([location, 0.15 * tf.ones_like(location)])
+    # Model
+    return Model(name=name, inputs=input, outputs=output)
+
+
 def generate_gamma_forecast_plots(y_true: pd.DataFrame, y_pred: pd.DataFrame,
-                            name: str, n=None, path: str = None) -> None:
-    quantiles = np.linspace(0,1,50)
+                                  name: str, n=None, path: str = None) -> None:
+    quantiles = np.linspace(0, 1, 50)
     if n is None:
         n = y_true.shape[0]
     for i in range(n):
         plt.figure(figsize=figsize)
         plt.plot(scipy.stats.gamma.ppf(quantiles,
                                        (y_pred.iloc[i])[0],
-                                       scale=1/((y_pred.iloc[i])[1])),
+                                       scale=1 / ((y_pred.iloc[i])[1])),
                  quantiles, color="blue", label="forecast")
         plt.vlines(y_true.iloc[i], ymin=0, ymax=1,
                    label="observation", color="red", linestyles="dashed")
         plt.xlim(left=0.0, right=max(1.0, plt.axis()[1]))
+        plt.title(name + " - Forecast " + str(i), fontdict=fontdict_title)
+        plt.legend()
+        if path is None:
+            plt.show()
+        else:
+            plt.savefig(path)
+
+
+def generate_logistic_forecast_plots(y_true: pd.DataFrame, y_pred: pd.DataFrame,
+                                     name: str, n=None, path: str = None) -> None:
+    x = np.linspace(0, 1.5, 150)
+    loc = y_pred.values[:, 0]
+    scale = y_pred.values[:, 1]
+    if n is None:
+        n = y_true.shape[0]
+    for i in range(n):
+        plt.figure(figsize=figsize)
+        plt.plot(x, (logistic.cdf((x - loc[i]) / scale[i]) - logistic.cdf(-loc[i] / scale[i])) / (
+                1 - logistic.cdf(-loc[i] / scale[i])), color="blue",
+                 label="forecast")
+        plt.vlines(y_true.iloc[i], ymin=0, ymax=1,
+                   label="observation", color="red", linestyles="dashed")
+        plt.xlim(left=0.0, right=np.maximum(1.0, y_true.values[i]))
         plt.title(name + " - Forecast " + str(i), fontdict=fontdict_title)
         plt.legend()
         if path is None:
@@ -364,8 +409,7 @@ if __name__ == "__main__":
               "variables": None,
               "train_split": 0.85,
 
-              "aggregation": "all",
-              "distribution": "gamma",
+              "aggregation": "mean+std",
               "layer_sizes": [20, 15],
               "activations": ["selu", "selu", "selu"],
 
@@ -393,23 +437,51 @@ if __name__ == "__main__":
                                                                                sc_obs_train,
                                                                                sc_obs_test)
     # Build model
-    model = get_drn_model(name="first_model",
-                          input_size=len(sc_ens_train_f.columns),
-                          layer_sizes=h_pars["layer_sizes"],
-                          activations=h_pars["activations"])
-    model.compile(optimizer="adam", loss=crps_gamma_loss, metrics=[crps_logistic_loss])
+    base_model = get_base_logistic_model(name="base_model",
+                                         input_size=len(sc_ens_train_f.columns),
+                                         layer_sizes=h_pars["layer_sizes"],
+                                         activations=h_pars["activations"])
+    base_model.compile(optimizer="adam", loss=custom_mae)
+    drn_model = get_drn_model(name="drn_model",
+                              input_size=len(sc_ens_train_f.columns),
+                              layer_sizes=h_pars["layer_sizes"],
+                              activations=h_pars["activations"])
+    drn_model.compile(optimizer="adam", loss=crps_logistic_loss)
     # Fit model
-    history = model.fit(x=sc_ens_train_f,
-                        y=sc_obs_train_f,
-                        batch_size=h_pars["batch_size"],
-                        epochs=100,
-                        verbose=1,
-                        validation_freq=1,
-                        validation_split=0.1,
-                        callbacks=[],
-                        use_multiprocessing=True
-                        )
+    base_model.fit(x=sc_ens_train_f,
+                   y=sc_obs_train_f,
+                   batch_size=h_pars["batch_size"],
+                   epochs=100,
+                   verbose=1,
+                   validation_freq=1,
+                   validation_split=0.1,
+                   callbacks=[EarlyStopping(monitor="val_loss",
+                                            patience=h_pars["patience"],
+                                            restore_best_weights=True)],
+                   use_multiprocessing=True
+                   )
+    drn_model.fit(x=sc_ens_train_f,
+                  y=sc_obs_train_f,
+                  batch_size=h_pars["batch_size"],
+                  epochs=100,
+                  verbose=1,
+                  validation_freq=1,
+                  validation_split=0.1,
+                  callbacks=[EarlyStopping(monitor="val_loss",
+                                           patience=h_pars["patience"],
+                                           restore_best_weights=True)],
+                  use_multiprocessing=True
+                  )
 
-    test = pd.DataFrame(model.predict(sc_ens_test_f), index=sc_ens_test_f.index)
+    base_test = pd.DataFrame(base_model.predict(sc_ens_test_f), index=sc_ens_test_f.index)
+    drn_test = pd.DataFrame(drn_model.predict(sc_ens_test_f), index=sc_ens_test_f.index)
+
+    # Evaluation
+    base_model.compile(optimizer="adam", loss=crps_logistic_loss)
+    print("Base Model:", base_model.evaluate(sc_ens_test_f, sc_obs_test_f))
+    print("DRN Model:", drn_model.evaluate(sc_ens_test_f, sc_obs_test_f))
+
+    # Plots
     with plt.xkcd():
-        generate_gamma_forecast_plots(sc_obs_test_f, test, "Test", n=10)
+       generate_logistic_forecast_plots(sc_obs_test_f, base_test, "Base", n=10)
+       generate_logistic_forecast_plots(sc_obs_test_f, drn_test, "DRN", n=10)

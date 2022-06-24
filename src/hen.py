@@ -5,6 +5,15 @@ from numpy import ndarray
 from src.preprocessing import preprocess_data, format_data, import_data, scale_data
 
 
+def observations_to_bins(obs: DataFrame, bin_edges: ndarray) -> DataFrame:
+    helper_frame = pd.DataFrame(index=obs.index, columns=[*range(len(bin_edges))])
+    helper_frame[[*range(len(bin_edges))]] = bin_edges
+    return pd.concat([obs, helper_frame], axis=1) \
+               .rank(axis=1) \
+               .iloc[(slice(None), [0])] \
+               .astype("int") - 2  # -2 to get the index of the bin, first bin being 0
+
+
 # From the observations, obtain N+1 bin edges for N bins
 def binning_scheme(obs: DataFrame, N: int) -> ndarray:
     # Sorted unique observation values
@@ -19,7 +28,8 @@ def binning_scheme(obs: DataFrame, N: int) -> ndarray:
     # Initialize bins
     bins = [[] for _ in obs_unique]
     for o in obs.values.squeeze():
-        for i in range(len(bin_edges)):  # this could in log(len(bin_edges)), scine bin_edges are sorted, but meh..
+        for i in range(
+                len(bin_edges)):  # this could in log(len(bin_edges)), scine bin_edges are sorted, but meh..
             if o < bin_edges[i]:
                 bins[i - 1].append(o)
                 break
@@ -30,23 +40,23 @@ def binning_scheme(obs: DataFrame, N: int) -> ndarray:
 
     # Reduce bin edges
     while len(bin_edges) > N + 1:
-        i_min = count.argmin()
+        i_min = count.argmin()  # index of smallest bin
         if i_min == 0:  # left most bin
-            bin_edges = np.delete(bin_edges, i_min+1)
-            count[i_min] = count[i_min] + count[i_min+1]
-            count = np.delete(count, i_min+1)
-        elif i_min == len(count)-1:  # right most bin
+            bin_edges = np.delete(bin_edges, i_min + 1)
+            count[i_min] = count[i_min] + count[i_min + 1]
+            count = np.delete(count, i_min + 1)
+        elif i_min == len(count) - 1:  # right most bin
             bin_edges = np.delete(bin_edges, i_min)
-            count[i_min-1] = count[i_min-1] + count[i_min]
+            count[i_min - 1] = count[i_min - 1] + count[i_min]
             count = np.delete(count, i_min)
-        elif count[i_min-1] < count[i_min+1]:  # middle bin with left bin smaller
+        elif count[i_min - 1] < count[i_min + 1]:  # middle bin with left bin smaller
             bin_edges = np.delete(bin_edges, i_min)
-            count[i_min-1] = count[i_min-1]+count[i_min]
+            count[i_min - 1] = count[i_min - 1] + count[i_min]
             count = np.delete(count, i_min)
         else:  # middle bin with right bin smaller
-            bin_edges = np.delete(bin_edges, i_min+1)
-            count[i_min] = count[i_min] + count[i_min+1]
-            count = np.delete(count, i_min+1)
+            bin_edges = np.delete(bin_edges, i_min + 1)
+            count[i_min] = count[i_min] + count[i_min + 1]
+            count = np.delete(count, i_min + 1)
     return bin_edges
 
 
@@ -76,5 +86,7 @@ if __name__ == "__main__":
     ens_train, ens_test, obs_train, obs_test = import_data(h_pars)
 
     # Test bin edges algorithm
-    bin_egdes = binning_scheme(obs_train, 20)
-    print(bin_egdes)
+    bin_edges = binning_scheme(obs_train, 20)
+    print(bin_edges)
+    train = observations_to_bins(obs_train, bin_edges)
+    test = observations_to_bins(obs_test, bin_edges)

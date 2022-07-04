@@ -70,7 +70,7 @@ def average_models(models: [Model], name) -> Model:
 
 # Construction of the loss function
 def build_quantile_loss(degree: int):  # -> Loss function
-    lql = tf.constant(np.arange(0.0, 1.01, 0.01),
+    lql = tf.constant(np.linspace(0.01, 0.99, 99),
                       dtype="float32")  # 1% to 99% quantile levels for the loss, equidistant
     B = tf.constant(np.array(
         [binom(degree, j) * np.power(lql, j) * np.power(1 - lql, degree - j) for j in
@@ -148,12 +148,12 @@ def build_crps_loss2(degree: int, min=0.0, max=1.0, eps=0.0):
 
 def build_crps_loss3(degree: int, min=0.0, max=1.0):
     # random quantile levels
-    lql = tf.constant(np.random.random(1000))
+    lql = tf.constant(np.linspace(0, 1, 10001))
     # Bernstein polynomials to interpolate the CDF
     B = tf.constant(np.array(
         [binom(degree, j) * np.power(lql, j) * np.power(1 - lql, degree - j) for j in
          range(degree + 1)]).transpose(), dtype="float32")
-    lql2 = tf.constant(np.random.random(1000), dtype="float32")
+    lql2 = tf.random.shuffle(lql)
     B2 = tf.constant(np.array(
         [binom(degree, j) * np.power(lql2, j) * np.power(1 - lql2, degree - j) for j in
          range(degree + 1)]).transpose(), dtype="float32")
@@ -232,6 +232,7 @@ def generate_histogram_plot(obs: pd.DataFrame, f: pd.DataFrame, name: str, bins:
     # TODO: y-achse bis festen Wert 0.5 z.B. für Vergleichbarkeit
     plt.xlabel("Ranks", fontdict=fontdict_axis)
     plt.xticks(np.arange(1, bins + 1), np.arange(1, bins + 1))
+    plt.ylim(bottom=0, top=0.18)
     plt.title(name, fontdict=fontdict_title)
     if path is None:
         plt.show()
@@ -282,12 +283,12 @@ if __name__ == "__main__":
               "train_split": 0.85,
 
               "aggregation": "mean+std",
-              "degree": 12,
-              "layer_sizes": [20, 15],
+              "degree": 10,
+              "layer_sizes": [20, 15, 10],
               "activations": ["selu", "selu", "selu"],
 
               "batch_size": 25,
-              "patience": 50,
+              "patience": 27,
               }
     # Default value for activation is "selu" if activations do not match layer_sizes
     if h_pars["activations"] is None or \
@@ -327,7 +328,7 @@ if __name__ == "__main__":
         history = model.fit(y=sc_obs_train_f,
                             x=sc_ens_train_f,
                             batch_size=h_pars["batch_size"],
-                            epochs=100,
+                            epochs=300,
                             verbose=1,
                             validation_freq=1,
                             validation_split=0.1,
@@ -360,7 +361,7 @@ if __name__ == "__main__":
         # Forecast plots
         with plt.xkcd():
             generate_forecast_plots(sc_obs_test_f[::51], test[::51], name="Forecast Plot",
-                                    quantile_levels=np.arange(0.0, 1.01, 0.01), n=1)
+                                    quantile_levels=np.linspace(0, 1, 101), n=1)
         # Test data forecast plots
         with plt.xkcd():
             generate_histogram_plot(sc_obs_test_f, test, "Rank Histogram of Test data", 21)

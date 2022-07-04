@@ -24,7 +24,8 @@ def unscale(data: pd.DataFrame, scaler_dict) -> pd.DataFrame:
         [pd.DataFrame(scaler_dict[name].inverse_transform(data[name].values.reshape(-1, 1)),
                       index=data.index, columns=[name]) for name in data.columns], axis=1)
 
-
+# TODO: dayofyear as predictor!
+# Manuell nen Validation set auswählen?
 def import_data(h_pars: dict):
     # h_pars must contain keys "horizon", "variables", "train_split"
 
@@ -73,7 +74,7 @@ def import_data(h_pars: dict):
 
     return ens_train, ens_test, obs_train, obs_test
 
-
+# TODO: Probeweise mal die Skalierung der Beobachtung rausnehmen
 def scale_data(ens_train: pd.DataFrame,
                ens_test: pd.DataFrame,
                obs_train: pd.DataFrame,

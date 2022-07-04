@@ -7,7 +7,6 @@ from keras.callbacks import EarlyStopping
 from scipy.special import binom
 from src.preprocessing import preprocess_data, format_data
 
-
 # For plot formatting
 fontdict_title = {"fontweight": "bold", "fontsize": 24}
 fontdict_axis = {"fontweight": "bold", "fontsize": 15}
@@ -218,8 +217,9 @@ def get_rank(obs: pd.DataFrame, quantiles: pd.DataFrame) -> pd.Series:
     return pd.concat([obs, quantiles], axis=1).rank(axis=1).iloc[:, 0].rename("rank").astype("int")
 
 
+# Path with a trailing "/"!
 def generate_histogram_plot(obs: pd.DataFrame, f: pd.DataFrame, name: str, bins: int = 10,
-                            path: str = None) -> None:
+                            path: str = None, filename: str = "rankhistogram") -> None:
     if bins < 2:
         raise Exception(
             "More than one bin is necessary for a sensable rank histogram. 'bins' = " + str(bins))
@@ -229,17 +229,18 @@ def generate_histogram_plot(obs: pd.DataFrame, f: pd.DataFrame, name: str, bins:
     plt.figure(figsize=figsize)
     plt.hist(ranks, bins=np.arange(0.5, bins + 1), weights=np.ones_like(ranks) / ranks.size)
     plt.hlines(1 / bins, linestyles="dashed", color="grey", xmin=0.5, xmax=bins + 0.5)
+    # TODO: y-achse bis festen Wert 0.5 z.B. für Vergleichbarkeit
     plt.xlabel("Ranks", fontdict=fontdict_axis)
     plt.xticks(np.arange(1, bins + 1), np.arange(1, bins + 1))
     plt.title(name, fontdict=fontdict_title)
     if path is None:
         plt.show()
     else:
-        plt.savefig(path)
+        plt.savefig(path + filename + "_" + str(i) + ".png")
 
-
+# Path with a trailing "/"!
 def generate_pit_plot(obs: pd.DataFrame, quantiles: pd.DataFrame, name: str, n_bins: int = 10,
-                      path: str = None) -> None:
+                      path: str = None, filename: str = "rankhistogram") -> None:
     ranks = get_rank(obs, quantiles)
     plt.figure(figsize=figsize)
     plt.hist(ranks, bins=n_bins, weights=np.ones_like(ranks) / ranks.size)
@@ -250,11 +251,13 @@ def generate_pit_plot(obs: pd.DataFrame, quantiles: pd.DataFrame, name: str, n_b
     if path is None:
         plt.show()
     else:
-        plt.savefig(path)
+        plt.savefig(path + filename + "_" + str(i) + ".png")
 
 
+# Path with a trailing "/"!
 def generate_forecast_plots(y_true: pd.DataFrame, y_pred: pd.DataFrame, quantile_levels: np.ndarray,
-                            name: str, n=None, path: str = None) -> None:
+                            name: str, n=None, path: str = None,
+                            filename: str = "forecast") -> None:
     q = get_quantiles(y_pred, quantile_levels=quantile_levels)
     if n is None:
         n = y_true.shape[0]
@@ -269,7 +272,7 @@ def generate_forecast_plots(y_true: pd.DataFrame, y_pred: pd.DataFrame, quantile
         if path is None:
             plt.show()
         else:
-            plt.savefig(path)
+            plt.savefig(path + filename + "_" + str(i) + ".png")
 
 
 if __name__ == "__main__":

@@ -60,6 +60,7 @@ def run_tuner():
                 hp_input_size = hp.Fixed(name="input_size", value=len(sc_ens_train_f.columns))
                 hp.Fixed(name="batch_size", value=batch_size)
 
+                # TODO: Kleinschrittiger
                 hp_degree = hp.Int(name="degree", min_value=4, max_value=25)
 
                 max_depth = 5
@@ -105,6 +106,7 @@ def run_tuner():
             stop_early = EarlyStopping(monitor='val_crps', patience=25, restore_best_weights=True)
 
             # Run the search
+            # TODO: Cross validation?
             tuner.search(sc_ens_train_f, sc_obs_train_f,
                          epochs=150,
                          batch_size=batch_size,

@@ -139,7 +139,8 @@ def get_drn_model(name: str, input_size: int, layer_sizes: [int], activations: [
     return Model(name=name, inputs=input, outputs=output)
 
 
-def get_base_logistic_model(name: str, input_size: int, layer_sizes: [int], activations: [str]) -> Model:
+def get_base_logistic_model(name: str, input_size: int, layer_sizes: [int],
+                            activations: [str]) -> Model:
     # Inputs
     input = layers.Input(shape=input_size, name="input")
 
@@ -149,10 +150,10 @@ def get_base_logistic_model(name: str, input_size: int, layer_sizes: [int], acti
         x = layers.Dense(units=layer_sizes[i + 1], activation=activations[i + 1],
                          name="hidden" + str(i + 1))(x)
 
-    # Output, size 2 for location and scale
+    # Output, size 1 for location
     location = layers.Dense(name="output", units=1, activation="softplus")(
         x)  # smooth, non-negative and proportional
-    output = layers.Concatenate()([location, 0.15 * tf.ones_like(location)])
+    output = layers.Concatenate()([location, 0.1 * tf.ones_like(location)])
     # Model
     return Model(name=name, inputs=input, outputs=output)
 
@@ -179,8 +180,10 @@ def generate_gamma_forecast_plots(y_true: pd.DataFrame, y_pred: pd.DataFrame,
             plt.savefig(path)
 
 
+# path with a trailing '/'!
 def generate_logistic_forecast_plots(y_true: pd.DataFrame, y_pred: pd.DataFrame,
-                                     name: str, n=None, path: str = None) -> None:
+                                     name: str, n=None, path: str = None,
+                                     filename: str = "forecast") -> None:
     x = np.linspace(0, 1.5, 150)
     loc = y_pred.values[:, 0]
     scale = y_pred.values[:, 1]
@@ -199,7 +202,7 @@ def generate_logistic_forecast_plots(y_true: pd.DataFrame, y_pred: pd.DataFrame,
         if path is None:
             plt.show()
         else:
-            plt.savefig(path)
+            plt.savefig(path + filename + "_" + str(i) + ".png")
 
 
 # Test code to see if benedikts model with custom loss works
@@ -481,7 +484,10 @@ if __name__ == "__main__":
     print("Base Model:", base_model.evaluate(sc_ens_test_f, sc_obs_test_f))
     print("DRN Model:", drn_model.evaluate(sc_ens_test_f, sc_obs_test_f))
 
+    path = "../results/drn/plots/forecasts/"
     # Plots
     with plt.xkcd():
-       generate_logistic_forecast_plots(sc_obs_test_f, base_test, "Base", n=10)
-       generate_logistic_forecast_plots(sc_obs_test_f, drn_test, "DRN", n=10)
+        generate_logistic_forecast_plots(sc_obs_test_f, base_test, "Base", n=10, path=None,
+                                         filename="base_forecast")
+        generate_logistic_forecast_plots(sc_obs_test_f, drn_test, "DRN", n=10, path=None,
+                                         filename="forecast")

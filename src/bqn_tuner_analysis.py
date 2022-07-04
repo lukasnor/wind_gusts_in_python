@@ -155,16 +155,17 @@ def evaluate_best_hps():
                                         name="Rank Histogram - " + str(
                                             horizon) + " - " + aggregation + " - Train",
                                         bins=21,
-                                        path="../results/bqn/plots/rankhistograms/horizon:" + str(
-                                            horizon) + "_agg:" + aggregation + "_train.png"
+                                        path="../results/bqn/plots/rankhistograms/",
+                                        filename="horizon:" + str(horizon) + "_agg:" + aggregation + "_train"
                                         )
                 generate_histogram_plot(obs=sc_obs_test_f,
                                         f=test,
                                         name="Rank Histogram - " + str(
                                             horizon) + " - " + aggregation + " - Test",
                                         bins=21,
-                                        path="../results/bqn/plots/rankhistograms/horizon:" + str(
-                                            horizon) + "_agg:" + aggregation + "_test.png"
+                                        path="../results/bqn/plots/rankhistograms/",
+                                        filename="horizon:" + str(
+                                            horizon) + "_agg:" + aggregation + "_test"
                                         )
                 generate_forecast_plots(y_true=sc_obs_test_f[::51],
                                         y_pred=test[::51],
@@ -172,8 +173,9 @@ def evaluate_best_hps():
                                         name="Test - Horizon " + str(
                                             horizon) + " - Aggregation " + aggregation,
                                         n=1,
-                                        path="../results/bqn/plots/forecasts/horizon:" + str(
-                                            horizon) + "_agg:" + aggregation + "_test.png")
+                                        path="../results/bqn/plots/forecasts/",
+                                        filename="horizon:" + str(
+                                            horizon) + "_agg:" + aggregation + "_test")
             evaluation.loc[index, "average"] = average_model.evaluate(x=sc_ens_test_f,
                                                                       y=sc_obs_test_f)
             print(evaluation)

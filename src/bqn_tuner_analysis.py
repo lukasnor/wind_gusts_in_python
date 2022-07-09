@@ -19,7 +19,7 @@ figsize = (13, 7)
 
 horizons = [3, 6, 9, 12, 15, 18, 21, 24]
 aggregations = ["single", "single+std", "mean+std", "mean", "all"]
-variables = ["u100", "v100", "t2m", "sp", "speed"]
+variables = ["u100", "v100", "t2m", "sp", "speed", "wind_power"]
 variable_selections = [variables]  # or =  list(powerset(variables))[1:]
 fixed_params_selections = [{"horizon": a, "variables": b, "aggregation": c} for a, b, c in
                            product(horizons, variable_selections, aggregations)]
@@ -57,12 +57,12 @@ def analysis_by_plots():
 
 def evaluate_best_hps():
     # Average 5 models
-    runs = 5
+    n_runs = 10
 
     # Import the best hps
     hps = load_hyperparameters_from_folders("../results/bqn/hps/")
     evaluation = pd.DataFrame(index=hps.index,
-                              columns=["run" + str(i + 1) for i in range(runs)] + ["average"])
+                              columns=["run" + str(i + 1) for i in range(n_runs)] + ["average"])
 
     fixed_params = {"variables": variables, "train_split": 0.85, "patience": 27}
     # horizons =[3]
@@ -71,7 +71,7 @@ def evaluate_best_hps():
         fixed_params["horizon"] = horizon
         # Import data
         sc_ens_train, sc_ens_test, sc_obs_train, sc_obs_test, scale_dict \
-            = preprocess_data(fixed_params)
+            = preprocess_data(horizon, variables, train_split=fixed_params["train_split"])
         obs_scaler = scale_dict["wind_power"]
         obs_max = obs_scaler.data_max_[0]
         obs_min = obs_scaler.data_min_[0]
@@ -100,91 +100,93 @@ def evaluate_best_hps():
             (sc_ens_train_f,
              sc_ens_test_f,
              sc_obs_train_f,
-             sc_obs_test_f) = format_data(fixed_params,
-                                          sc_ens_train,
+             sc_obs_test_f) = format_data(sc_ens_train,
                                           sc_ens_test,
                                           sc_obs_train,
-                                          sc_obs_test)
-            models = []
-            for i in range(runs):
-                model = get_model(name="run" + str(i + 1),
-                                  input_size=len(sc_ens_train_f.columns),
-                                  layer_sizes=fixed_params["layer_sizes"],
-                                  activations=fixed_params["activations"],
-                                  degree=fixed_params["degree"]
-                                  )
-                model.compile(optimizer=adam.Adam(fixed_params["learning_rate"]),
-                              loss=build_quantile_loss(fixed_params["degree"]),
-                              metrics=[build_crps_loss3(fixed_params["degree"],
-                                                        obs_min, obs_max)]
+                                          sc_obs_test,
+                                          aggregation)
+        models = []
+        for i in range(n_runs):
+            model = get_model(name="run" + str(i + 1),
+                              input_size=len(sc_ens_train_f.columns),
+                              layer_sizes=fixed_params["layer_sizes"],
+                              activations=fixed_params["activations"],
+                              degree=fixed_params["degree"]
                               )
-                history = model.fit(x=sc_ens_train_f,
-                                    y=sc_obs_train_f,
-                                    batch_size=fixed_params["batch_size"],
-                                    epochs=150,
-                                    verbose=1,
-                                    validation_freq=1,
-                                    validation_split=0.1,
-                                    callbacks=[EarlyStopping(monitor="val_crps",
-                                                             patience=fixed_params["patience"],
-                                                             restore_best_weights=True)],
-                                    use_multiprocessing=True
-                                    )
-                model.trainable = False
+            model.compile(optimizer=adam.Adam(fixed_params["learning_rate"]),
+                          loss=build_quantile_loss(fixed_params["degree"]),
+                          metrics=[build_crps_loss3(fixed_params["degree"],
+                                                    obs_min, obs_max)]
+                          )
+            history = model.fit(x=sc_ens_train_f,
+                                y=sc_obs_train_f,
+                                batch_size=fixed_params["batch_size"],
+                                epochs=150,
+                                verbose=1,
+                                validation_freq=1,
+                                validation_split=0.1,
+                                callbacks=[EarlyStopping(monitor="val_crps",
+                                                         patience=fixed_params["patience"],
+                                                         restore_best_weights=True)],
+                                use_multiprocessing=True
+                                )
+            model.trainable = False
 
-                # Evaluation
-                model.compile(optimizer="adam",
-                              loss=build_crps_loss3(fixed_params["degree"], obs_min, obs_max))
-                evaluation.loc[index, "run" + str(i + 1)] \
-                    = model.evaluate(x=sc_ens_test_f, y=sc_obs_test_f)
-                print(evaluation)
-                models.append(model)
-
-            average_model = average_models(models, name="average_model")
-            average_model.compile(loss=build_crps_loss3(fixed_params["degree"],
-                                                        obs_min, obs_max)
-                                  )
-
-            # Generate plots for average_model
-            train = pd.DataFrame(average_model.predict(sc_ens_train_f), index=sc_ens_train_f.index)
-            test = pd.DataFrame(average_model.predict(sc_ens_test_f), index=sc_ens_test_f.index)
-            quantile_levels = np.arange(0.0, 1.01, 0.01)
-            with plt.xkcd():
-                generate_histogram_plot(obs=sc_obs_train_f,
-                                        f=train,
-                                        name="Rank Histogram - " + str(
-                                            horizon) + " - " + aggregation + " - Train",
-                                        bins=21,
-                                        path="../results/bqn/plots/rankhistograms/",
-                                        filename="horizon:" + str(horizon) + "_agg:" + aggregation + "_train"
-                                        )
-                generate_histogram_plot(obs=sc_obs_test_f,
-                                        f=test,
-                                        name="Rank Histogram - " + str(
-                                            horizon) + " - " + aggregation + " - Test",
-                                        bins=21,
-                                        path="../results/bqn/plots/rankhistograms/",
-                                        filename="horizon:" + str(
-                                            horizon) + "_agg:" + aggregation + "_test"
-                                        )
-                generate_forecast_plots(y_true=sc_obs_test_f[::51],
-                                        y_pred=test[::51],
-                                        quantile_levels=quantile_levels,
-                                        name="Test - Horizon " + str(
-                                            horizon) + " - Aggregation " + aggregation,
-                                        n=1,
-                                        path="../results/bqn/plots/forecasts/",
-                                        filename="horizon:" + str(
-                                            horizon) + "_agg:" + aggregation + "_test")
-            evaluation.loc[index, "average"] = average_model.evaluate(x=sc_ens_test_f,
-                                                                      y=sc_obs_test_f)
+            # Evaluation
+            model.compile(optimizer="adam",
+                          loss=build_crps_loss3(fixed_params["degree"], obs_min, obs_max))
+            evaluation.loc[index, "run" + str(i + 1)] \
+                = model.evaluate(x=sc_ens_test_f, y=sc_obs_test_f)
             print(evaluation)
+            models.append(model)
 
-            # Make model persistent for future evaluation
-            average_model.save(
-                "../results/bqn/models/horizon:" + str(horizon) + "_agg:" + aggregation + ".h5")
+        average_model = average_models(models, name="average_model")
+        average_model.compile(loss=build_crps_loss3(fixed_params["degree"],
+                                                    obs_min, obs_max)
+                              )
 
-    evaluation.to_csv("../results/bqn/crps_evaluation.csv")
+        # Generate plots for average_model
+        train = pd.DataFrame(average_model.predict(sc_ens_train_f), index=sc_ens_train_f.index)
+        test = pd.DataFrame(average_model.predict(sc_ens_test_f), index=sc_ens_test_f.index)
+        quantile_levels = np.arange(0.0, 1.01, 0.01)
+        with plt.xkcd():
+            generate_histogram_plot(obs=sc_obs_train_f,
+                                    f=train,
+                                    name="Rank Histogram - " + str(
+                                        horizon) + " - " + aggregation + " - Train",
+                                    bins=21,
+                                    path="../results/bqn/plots/rankhistograms/",
+                                    filename="horizon:" + str(
+                                        horizon) + "_agg:" + aggregation + "_train"
+                                    )
+            generate_histogram_plot(obs=sc_obs_test_f,
+                                    f=test,
+                                    name="Rank Histogram - " + str(
+                                        horizon) + " - " + aggregation + " - Test",
+                                    bins=21,
+                                    path="../results/bqn/plots/rankhistograms/",
+                                    filename="horizon:" + str(
+                                        horizon) + "_agg:" + aggregation + "_test"
+                                    )
+            generate_forecast_plots(y_true=sc_obs_test_f[::51],
+                                    y_pred=test[::51],
+                                    quantile_levels=quantile_levels,
+                                    name="Test - Horizon " + str(
+                                        horizon) + " - Aggregation " + aggregation,
+                                    n=1,
+                                    path="../results/bqn/plots/forecasts/",
+                                    filename="horizon:" + str(
+                                        horizon) + "_agg:" + aggregation + "_test")
+        evaluation.loc[index, "average"] = average_model.evaluate(x=sc_ens_test_f,
+                                                                  y=sc_obs_test_f)
+        print(evaluation)
+
+        # Make model persistent for future evaluation
+        average_model.save(
+            "../results/bqn/models/horizon:" + str(horizon) + "_agg:" + aggregation + ".h5")
+
+
+evaluation.to_csv("../results/bqn/crps_evaluation.csv")
 
 
 def plot_crps_per_horizon_per_aggregation(plots_path=None):

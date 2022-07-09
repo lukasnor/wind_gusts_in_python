@@ -20,7 +20,7 @@ def powerset(list):
 
 # possible values of the fixed params
 horizons = [3, 6, 9, 12, 15, 18, 21, 24]
-variables = ["u100", "v100", "t2m", "sp", "speed"]
+variables = ["u100", "v100", "t2m", "sp", "speed", "wind_power"]
 variable_selections = [variables]  # or =  list(powerset(variables))[1:]
 aggregations = ["single", "single+std", "mean+std", "mean", "all"]
 #aggregations = ["mean"]
@@ -35,8 +35,11 @@ def run_tuner():
     for horizon in horizons:
         fixed_params = {"horizon": horizon, "variables": variables, "train_split": 0.85}
         # Import data
-        sc_ens_train, sc_ens_test, sc_obs_train, sc_obs_test, scale_dict = preprocess_data(
-            fixed_params)
+        sc_ens_train,\
+        sc_ens_test,\
+        sc_obs_train,\
+        sc_obs_test,\
+        scale_dict = preprocess_data(horizon=horizon, train_variables=variables, train_split=0.85)
         obs_scaler = scale_dict["wind_power"]
         obs_max = obs_scaler.data_max_
         obs_min = obs_scaler.data_min_
@@ -44,11 +47,11 @@ def run_tuner():
         for aggregation in aggregations:
             fixed_params["aggregation"] = aggregation
             # Format data according to aggregation method
-            sc_ens_train_f, sc_ens_test_f, sc_obs_train_f, sc_obs_test_f = format_data(fixed_params,
-                                                                                       sc_ens_train,
+            sc_ens_train_f, sc_ens_test_f, sc_obs_train_f, sc_obs_test_f = format_data(sc_ens_train,
                                                                                        sc_ens_test,
                                                                                        sc_obs_train,
-                                                                                       sc_obs_test)
+                                                                                       sc_obs_test,
+                                                                                       aggregation)
             if aggregation in ["single", "single+std"]:
                 batch_size = 100
             else:
@@ -60,8 +63,7 @@ def run_tuner():
                 hp_input_size = hp.Fixed(name="input_size", value=len(sc_ens_train_f.columns))
                 hp.Fixed(name="batch_size", value=batch_size)
 
-                # TODO: Kleinschrittiger
-                hp_degree = hp.Int(name="degree", min_value=4, max_value=25)
+                hp_degree = hp.Int(name="degree", min_value=4, max_value=16, step=2)
 
                 max_depth = 5
                 # min_layer_size = max(int(hp_input_size / 4), 10)
@@ -106,7 +108,7 @@ def run_tuner():
             stop_early = EarlyStopping(monitor='val_crps', patience=25, restore_best_weights=True)
 
             # Run the search
-            # TODO: Cross validation?
+            # TODO: Cross validation? -> Nein.. sehr unwahrscheinlich
             tuner.search(sc_ens_train_f, sc_obs_train_f,
                          epochs=150,
                          batch_size=batch_size,
@@ -119,6 +121,7 @@ def run_tuner():
             best_model_candidates = []
             # For each set of hps, average model over 3 runs
             for hp in best_hps_candidates:
+                n_runs = 10
                 print(hp.values)
                 models = [get_model(name="model" + str(i),
                                     input_size=hp["input_size"],
@@ -126,7 +129,7 @@ def run_tuner():
                                                  range(hp["depth"])],
                                     activations=[hp["activation"] for _ in range(hp["depth"])],
                                     degree=hp["degree"])
-                          for i in range(3)]
+                          for i in range(n_runs)]
                 for model in models:
                     model.compile(optimizer=keras.optimizer_v2.adam.Adam(hp["learning_rate"]),
                                   loss=build_quantile_loss(hp["degree"]),

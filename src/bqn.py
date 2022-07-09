@@ -232,12 +232,13 @@ def generate_histogram_plot(obs: pd.DataFrame, f: pd.DataFrame, name: str, bins:
     # TODO: y-achse bis festen Wert 0.5 z.B. für Vergleichbarkeit
     plt.xlabel("Ranks", fontdict=fontdict_axis)
     plt.xticks(np.arange(1, bins + 1), np.arange(1, bins + 1))
-    plt.ylim(bottom=0, top=0.18)
+    plt.ylim(bottom=0, top=0.25)
     plt.title(name, fontdict=fontdict_title)
     if path is None:
         plt.show()
     else:
         plt.savefig(path + filename + "_" + str(i) + ".png")
+
 
 # Path with a trailing "/"!
 def generate_pit_plot(obs: pd.DataFrame, quantiles: pd.DataFrame, name: str, n_bins: int = 10,
@@ -282,7 +283,7 @@ if __name__ == "__main__":
               "variables": None,
               "train_split": 0.85,
 
-              "aggregation": "mean+std",
+              "aggregation": "all",
               "degree": 10,
               "layer_sizes": [20, 15, 10],
               "activations": ["selu", "selu", "selu"],
@@ -296,24 +297,29 @@ if __name__ == "__main__":
         h_pars["activations"] = ["selu" for i in range(len(h_pars["layer_sizes"]))]
     # Default value for variables is 'using all variables'
     if h_pars["variables"] is None:
-        h_pars["variables"] = ["u100", "v100", "t2m", "sp", "speed"]
+        h_pars["variables"] = ["u100", "v100", "t2m", "sp", "speed", "wind_power"]
 
     # Import the data
     sc_ens_train, sc_ens_test, sc_obs_train, sc_obs_test, scale_dict \
-        = preprocess_data(h_pars=h_pars)
+        = preprocess_data(horizon=h_pars["horizon"],
+                          train_variables=h_pars["variables"],
+                          train_split=h_pars["train_split"])
     obs_scaler = scale_dict["wind_power"]
     obs_max = obs_scaler.data_max_
     obs_min = obs_scaler.data_min_
     # Format the data
-    sc_ens_train_f, sc_ens_test_f, sc_obs_train_f, sc_obs_test_f = format_data(h_pars,
-                                                                               sc_ens_train,
-                                                                               sc_ens_test,
-                                                                               sc_obs_train,
-                                                                               sc_obs_test)
+    sc_ens_train_f, \
+    sc_ens_test_f, \
+    sc_obs_train_f, \
+    sc_obs_test_f = format_data(sc_ens_train,
+                                sc_ens_test,
+                                sc_obs_train,
+                                sc_obs_test,
+                                h_pars["aggregation"])
 
     # Average over models
     models = []
-    for i in range(5):
+    for i in range(10):
         # Build model
         model = get_model(name="Foo" + str(i),
                           input_size=len(sc_ens_train_f.columns),

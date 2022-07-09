@@ -49,7 +49,7 @@ def binning_scheme(obs: DataFrame, N: int) -> ndarray:
         else:
             bins[-1].append(o)
     # Count number of observations in each bin
-    count = np.array([*map(lambda bin: len(bin), bins)])
+    count = np.array([*map(len, bins)])
 
     # Reduce bin edges
     while len(bin_edges) > N + 1:
@@ -115,10 +115,12 @@ if __name__ == "__main__":
         h_pars["activations"] = ["selu" for i in range(len(h_pars["layer_sizes"]))]
     # Default value for variables is 'using all variables'
     if h_pars["variables"] is None:
-        h_pars["variables"] = ["u100", "v100", "t2m", "sp", "speed"]
+        h_pars["variables"] = ["u100", "v100", "t2m", "sp", "speed", "wind_speed"]
 
     # Import the data
-    ens_train, ens_test, obs_train, obs_test = import_data(h_pars)
+    ens_train, ens_test, obs_train, obs_test = import_data(horizon=h_pars["horizon"],
+                                                           variables=h_pars["variables"],
+                                                           train_split=h_pars["train_split"])
 
     # Get the bin edges
     bin_edges = binning_scheme(obs_train, h_pars["n_bins"])
@@ -132,14 +134,18 @@ if __name__ == "__main__":
     sc_ens_test, \
     sc_obs_train, \
     sc_obs_test, \
-    scale_dict = scale_data(ens_train, ens_test, obs_train, obs_test)
+    scale_dict = scale_data(ens_train,
+                            ens_test,
+                            obs_train,
+                            obs_test,
+                            variables=h_pars["train_split"])
 
     # Format input
-    sc_ens_train_f, sc_ens_test_f, _, _ = format_data(h_pars,
-                                                      sc_ens_train,
+    sc_ens_train_f, sc_ens_test_f, _, _ = format_data(sc_ens_train,
                                                       sc_ens_test,
                                                       sc_obs_train,
-                                                      sc_obs_test)
+                                                      sc_obs_test,
+                                                      aggregation=h_pars["aggregation"])
 
     # Build model
     model = get_model("First_model",

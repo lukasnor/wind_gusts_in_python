@@ -70,9 +70,9 @@ def evaluate_best_hps():
     for horizon in horizons:
         fixed_params["horizon"] = horizon
         # Import data
-        sc_ens_train, sc_ens_test, sc_obs_train, sc_obs_test, scale_dict \
+        sc_ens_train, sc_ens_test, sc_obs_train, sc_obs_test, input_scalers, output_scalers \
             = preprocess_data(horizon, variables, train_split=fixed_params["train_split"])
-        obs_scaler = scale_dict["wind_power"]
+        obs_scaler = output_scalers["wind_power"]
         obs_max = obs_scaler.data_max_[0]
         obs_min = obs_scaler.data_min_[0]
 
@@ -185,8 +185,7 @@ def evaluate_best_hps():
         average_model.save(
             "../results/bqn/models/horizon:" + str(horizon) + "_agg:" + aggregation + ".h5")
 
-
-evaluation.to_csv("../results/bqn/crps_evaluation.csv")
+    evaluation.to_csv("../results/bqn/crps_evaluation.csv")
 
 
 def plot_crps_per_horizon_per_aggregation(plots_path=None):
@@ -272,52 +271,54 @@ def plot_rank_histograms_and_forecasts(plots_path=None):
     for horizon in horizons:
         fixed_params["horizon"] = horizon
         # Import data
-        sc_ens_train, sc_ens_test, sc_obs_train, sc_obs_test, scale_dict \
-            = preprocess_data(fixed_params)
-        obs_scaler = scale_dict["wind_power"]
+        sc_ens_train, sc_ens_test, sc_obs_train, sc_obs_test, input_scalers, output_scalers \
+            = preprocess_data(horizon=horizon,
+                              variables=fixed_params["variables"],
+                              train_split=fixed_params["train_split"])
+        obs_scaler = output_scalers["wind_power"]
         obs_max = obs_scaler.data_max_
         obs_min = obs_scaler.data_min_
 
         for aggregation in aggregations:
             index = (horizon, aggregation)
-            degree = hps.loc[index, "degree"]
-            crps = build_crps_loss3(degree, obs_min, obs_max)
-            model = load_model(horizon, aggregation, crps)
-            fixed_params["aggregation"] = aggregation
+        degree = hps.loc[index, "degree"]
+        crps = build_crps_loss3(degree, obs_min, obs_max)
+        model = load_model(horizon, aggregation, crps)
+        fixed_params["aggregation"] = aggregation
 
-            (sc_ens_train_f,
-             sc_ens_test_f,
-             sc_obs_train_f,
-             sc_obs_test_f) = format_data(fixed_params,
-                                          sc_ens_train,
-                                          sc_ens_test,
-                                          sc_obs_train,
-                                          sc_obs_test)
-            train = pd.DataFrame(model.predict(sc_ens_train_f), index=sc_ens_train_f.index)
-            test = pd.DataFrame(model.predict(sc_ens_test_f), index=sc_obs_test_f.index)
-            with plt.xkcd():
-                generate_histogram_plot(sc_obs_train_f,
-                                        train,
-                                        "Rank Histogram - Train data\n Horizon " + str(horizon) +
-                                        " - Aggregation " + aggregation,
-                                        21,
-                                        path=plots_path + "rankhistograms/horizon:" + str(
-                                            horizon) + "_agg:" + aggregation + "_train.png" if plots_path is not None else None
-                                        )
-                generate_histogram_plot(sc_obs_test_f,
-                                        test,
-                                        "Rank Histogram - Test data\n Horizon " + str(horizon) +
-                                        " - Aggregation " + aggregation,
-                                        21,
-                                        path=plots_path + "rankhistograms/horizon:" + str(
-                                            horizon) + "_agg:" + aggregation + "_test.png" if plots_path is not None else None
-                                        )
-                generate_forecast_plots(sc_obs_test_f[::51], test[::51],
-                                        name="Example Forecast Plot",
-                                        quantile_levels=np.arange(0, 1.01, 0.01), n=1,
-                                        path=plots_path + "forecasts/horizon:" + str(
-                                            horizon) + "_agg:" + aggregation + ".png" if plots_path is not None else None
-                                        )
+        (sc_ens_train_f,
+         sc_ens_test_f,
+         sc_obs_train_f,
+         sc_obs_test_f) = format_data(fixed_params,
+                                      sc_ens_train,
+                                      sc_ens_test,
+                                      sc_obs_train,
+                                      sc_obs_test)
+        train = pd.DataFrame(model.predict(sc_ens_train_f), index=sc_ens_train_f.index)
+        test = pd.DataFrame(model.predict(sc_ens_test_f), index=sc_obs_test_f.index)
+        with plt.xkcd():
+            generate_histogram_plot(sc_obs_train_f,
+                                    train,
+                                    "Rank Histogram - Train data\n Horizon " + str(horizon) +
+                                    " - Aggregation " + aggregation,
+                                    21,
+                                    path=plots_path + "rankhistograms/horizon:" + str(
+                                        horizon) + "_agg:" + aggregation + "_train.png" if plots_path is not None else None
+                                    )
+        generate_histogram_plot(sc_obs_test_f,
+                                test,
+                                "Rank Histogram - Test data\n Horizon " + str(horizon) +
+                                " - Aggregation " + aggregation,
+                                21,
+                                path=plots_path + "rankhistograms/horizon:" + str(
+                                    horizon) + "_agg:" + aggregation + "_test.png" if plots_path is not None else None
+                                )
+        generate_forecast_plots(sc_obs_test_f[::51], test[::51],
+                                name="Example Forecast Plot",
+                                quantile_levels=np.arange(0, 1.01, 0.01), n=1,
+                                path=plots_path + "forecasts/horizon:" + str(
+                                    horizon) + "_agg:" + aggregation + ".png" if plots_path is not None else None
+                                )
 
 
 def analyze_first_coefficient(plots_path=None):
@@ -327,9 +328,11 @@ def analyze_first_coefficient(plots_path=None):
     for horizon in horizons:
         fixed_params["horizon"] = horizon
         # Import data
-        sc_ens_train, sc_ens_test, sc_obs_train, sc_obs_test, scale_dict \
-            = preprocess_data(fixed_params)
-        obs_scaler = scale_dict["wind_power"]
+        sc_ens_train, sc_ens_test, sc_obs_train, sc_obs_test, input_scalers, output_scalers \
+            = preprocess_data(horizon=horizon,
+                              train_variables=fixed_params["variables"],
+                              train_split=fixed_params["train_split"])
+        obs_scaler = output_scalers["wind_power"]
         obs_max = obs_scaler.data_max_
         obs_min = obs_scaler.data_min_
 
@@ -343,11 +346,11 @@ def analyze_first_coefficient(plots_path=None):
             (sc_ens_train_f,
              sc_ens_test_f,
              sc_obs_train_f,
-             sc_obs_test_f) = format_data(fixed_params,
-                                          sc_ens_train,
+             sc_obs_test_f) = format_data(sc_ens_train,
                                           sc_ens_test,
                                           sc_obs_train,
-                                          sc_obs_test)
+                                          sc_obs_test,
+                                          fixed_params["aggregation"])
             test = pd.DataFrame(model.predict(sc_ens_test_f), index=sc_obs_test_f.index)
             coeffs.loc[index] = test[0].mean()
     with plt.xkcd():

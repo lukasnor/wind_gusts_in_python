@@ -428,17 +428,18 @@ if __name__ == "__main__":
         h_pars["variables"] = ["u100", "v100", "t2m", "sp", "speed"]
 
     # Import the data
-    sc_ens_train, sc_ens_test, sc_obs_train, sc_obs_test, scale_dict \
-        = preprocess_data(h_pars=h_pars)
-    obs_scaler = scale_dict["wind_power"]
+    sc_ens_train, sc_ens_test, sc_obs_train, sc_obs_test, input_scalers, output_scalers \
+        = preprocess_data(h_pars["horizon"], h_pars["variables"], h_pars["train_split"])
+    obs_scaler = output_scalers["wind_power"]
     obs_max = obs_scaler.data_max_
     obs_min = obs_scaler.data_min_
+
     # Format the data
-    sc_ens_train_f, sc_ens_test_f, sc_obs_train_f, sc_obs_test_f = format_data(h_pars,
-                                                                               sc_ens_train,
+    sc_ens_train_f, sc_ens_test_f, sc_obs_train_f, sc_obs_test_f = format_data(sc_ens_train,
                                                                                sc_ens_test,
                                                                                sc_obs_train,
-                                                                               sc_obs_test)
+                                                                               sc_obs_test,
+                                                                               h_pars["aggregation"])
     # Build model
     base_model = get_base_logistic_model(name="base_model",
                                          input_size=len(sc_ens_train_f.columns),

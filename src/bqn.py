@@ -283,7 +283,7 @@ if __name__ == "__main__":
               "variables": None,
               "train_split": 0.85,
 
-              "aggregation": "all",
+              "aggregation": "mean+std",
               "degree": 10,
               "layer_sizes": [20, 15, 10],
               "activations": ["selu", "selu", "selu"],
@@ -300,13 +300,15 @@ if __name__ == "__main__":
         h_pars["variables"] = ["u100", "v100", "t2m", "sp", "speed", "wind_power"]
 
     # Import the data
-    sc_ens_train, sc_ens_test, sc_obs_train, sc_obs_test, scale_dict \
-        = preprocess_data(horizon=h_pars["horizon"],
-                          train_variables=h_pars["variables"],
-                          train_split=h_pars["train_split"])
-    obs_scaler = scale_dict["wind_power"]
+    sc_ens_train, sc_ens_test, sc_obs_train, sc_obs_test, input_scalers, output_scalers \
+        = preprocess_data(horizon=h_pars["horizon"], train_variables=h_pars["variables"],
+                          train_split=h_pars["train_split"],
+                          input_variables=h_pars["variables"], output_variables=None)
+    obs_scaler = output_scalers["wind_power"]
     obs_max = obs_scaler.data_max_
     obs_min = obs_scaler.data_min_
+    #obs_max = 1.0
+    #obs_min = 0.0
     # Format the data
     sc_ens_train_f, \
     sc_ens_test_f, \
@@ -319,7 +321,7 @@ if __name__ == "__main__":
 
     # Average over models
     models = []
-    for i in range(10):
+    for i in range(5):
         # Build model
         model = get_model(name="Foo" + str(i),
                           input_size=len(sc_ens_train_f.columns),
@@ -347,9 +349,9 @@ if __name__ == "__main__":
         # Plot the learning curves
         with plt.xkcd():
             plt.figure(figsize=figsize)
-            plt.plot(history.history["loss"], label="loss")
-            plt.plot(history.history["val_loss"], label="val_loss")
-            plt.plot(history.history["val_crps"], label="val_crps")
+            plt.plot(history.history["loss"][5:], label="loss")
+            plt.plot(history.history["val_loss"][5:], label="val_loss")
+            plt.plot(history.history["val_crps"][5:], label="val_crps")
             plt.legend()
             plt.xlabel("Epochs", fontdict=fontdict_axis)
             plt.title(

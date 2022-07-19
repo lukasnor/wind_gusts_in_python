@@ -53,8 +53,7 @@ def import_data(horizon: int, variables: [str], train_split: float) -> (
     # Select only relevant horizon
     ensembles = ensembles.sort_index(level=[0, 1, 2])
     ensembles = ensembles.loc[(horizon, slice(None), slice(None))]
-    ensembles.index = ensembles.index.droplevel(0)
-    n_ens = len(ensembles.index.get_level_values(1).unique())
+    #ensembles.index = ensembles.index.droplevel(0)
 
     # Split train and test set according to h_pars["train_split"]
     possible_dates = observations.index.map(lambda d: d.ceil(freq="D")).intersection( \

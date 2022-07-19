@@ -39,8 +39,9 @@ def run_tuner():
         sc_ens_test,\
         sc_obs_train,\
         sc_obs_test,\
-        scale_dict = preprocess_data(horizon=horizon, train_variables=variables, train_split=0.85)
-        obs_scaler = scale_dict["wind_power"]
+        input_scalers,\
+        output_scalers= preprocess_data(horizon=horizon, train_variables=variables, train_split=0.85)
+        obs_scaler = output_scalers["wind_power"]
         obs_max = obs_scaler.data_max_
         obs_min = obs_scaler.data_min_
 
@@ -101,7 +102,7 @@ def run_tuner():
 
             tuner = Hyperband(model_builder,
                               objective=keras_tuner.Objective('val_crps', direction="min"),
-                              max_epochs=125,
+                              max_epochs=300,
                               factor=3,
                               directory='../results/bqn/tuning',
                               project_name="horizon:" + str(horizon) + "_agg:" + str(aggregation))
@@ -110,7 +111,7 @@ def run_tuner():
             # Run the search
             # TODO: Cross validation? -> Nein.. sehr unwahrscheinlich
             tuner.search(sc_ens_train_f, sc_obs_train_f,
-                         epochs=150,
+                         epochs=300,
                          batch_size=batch_size,
                          validation_split=0.1,
                          callbacks=[stop_early],
@@ -138,7 +139,7 @@ def run_tuner():
                     model.fit(x=sc_ens_train_f,
                               y=sc_obs_train_f,
                               batch_size=batch_size,
-                              epochs=150,
+                              epochs=300,
                               verbose=1,
                               validation_freq=1,
                               validation_split=0.1,

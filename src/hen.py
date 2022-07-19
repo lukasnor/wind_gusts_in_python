@@ -7,6 +7,7 @@ from pandas import DataFrame
 import numpy as np
 from numpy import ndarray
 from src.preprocessing import format_data, import_data, scale_data
+import tensorflow as tf
 
 
 def obs_to_bins(obs: DataFrame, bin_edges: ndarray) -> DataFrame:
@@ -27,6 +28,7 @@ def obs_to_categorical(obs: DataFrame, bin_edges: ndarray) -> DataFrame:
     return bins_to_categorical(obs_to_bins(obs, bin_edges), len(bin_edges))
 
 
+# For our data almost equivalent to using quantiles, at least for 20 bins
 # From the observations, obtain N+1 bin edges for N bins, excluding the last bin
 def binning_scheme(obs: DataFrame, N: int) -> ndarray:
     # Sorted unique observation values
@@ -91,9 +93,31 @@ def get_model(name: str, input_size: int, layer_sizes: [int], activations: [str]
     return Model(name=name, inputs=ens_input, outputs=output)
 
 
+def build_hen_crps(bin_edges: np.ndarray):
+    N = len(bin_edges) - 1
+    b = tf.constant(bin_edges, dtype="float", shape=(1, N + 1))
+    b_minus = b[:, :-1]
+    b_plus = b[:, 1:]
+    d = b_plus - b_minus
+
+    def crps(y_true, y_pred):
+        y_tilde = tf.minimum(b_plus, tf.maximum(b_minus, y_true))
+        L = tf.cumsum(y_pred, axis=1, exclusive=True)
+        first = tf.pow(L, 2) * (y_tilde - b_minus)
+        second = tf.pow(1 - L, 2) * (b_plus - y_tilde)
+        third = y_pred * tf.pow(y_tilde - b_minus, 2) / d
+        forth = y_pred * d * (L - 1 + y_pred / 3)
+        fifth = tf.abs(y_true - tf.minimum(b[0, N], tf.maximum(b[0, 0], y_true)))
+        return tf.reduce_mean(
+            tf.expand_dims(tf.reduce_sum(first + second + third + forth, axis=1), axis=1) + fifth)
+
+    return crps
+
+
 def generate_forecast_plots(y_true: pd.DataFrame, y_pred: pd.DataFrame, bin_edges: ndarray,
                             name: str, n=None, path: str = None) -> None:
     pass
+
 
 if __name__ == "__main__":
 
@@ -102,7 +126,7 @@ if __name__ == "__main__":
               "train_split": 0.85,
 
               "aggregation": "mean+std",
-              "n_bins": 20,  # actually one bin more, since higher than observed values might occur
+              "n_bins": 20,
               "layer_sizes": [20, 15],
               "activations": ["selu", "selu"],
 
@@ -115,7 +139,7 @@ if __name__ == "__main__":
         h_pars["activations"] = ["selu" for i in range(len(h_pars["layer_sizes"]))]
     # Default value for variables is 'using all variables'
     if h_pars["variables"] is None:
-        h_pars["variables"] = ["u100", "v100", "t2m", "sp", "speed", "wind_speed"]
+        h_pars["variables"] = ["u100", "v100", "t2m", "sp", "speed", "wind_power"]
 
     # Import the data
     ens_train, ens_test, obs_train, obs_test = import_data(horizon=h_pars["horizon"],
@@ -125,20 +149,26 @@ if __name__ == "__main__":
     # Get the bin edges
     bin_edges = binning_scheme(obs_train, h_pars["n_bins"])
 
-    # Make obs categorical
-    cat_obs_train = obs_to_categorical(obs_train, bin_edges)
+    # Make observations categorical
+    # drop last category, since no train value is outside last bin
+    cat_obs_train = obs_to_categorical(obs_train, bin_edges).iloc[:, :-1]
+    # Merge outliers into the last bin in the test data
     cat_obs_test = obs_to_categorical(obs_test, bin_edges)
+    cat_obs_test.iloc[:, -2] = cat_obs_test.iloc[:, -2:].sum(axis=1)
+    cat_obs_test = cat_obs_test.iloc[:, :-1]
 
     # Scale the input
     sc_ens_train, \
     sc_ens_test, \
     sc_obs_train, \
     sc_obs_test, \
-    scale_dict = scale_data(ens_train,
-                            ens_test,
-                            obs_train,
-                            obs_test,
-                            variables=h_pars["train_split"])
+    input_scalers, \
+    output_scalers = scale_data(ens_train,
+                                ens_test,
+                                obs_train,
+                                obs_test,
+                                input_variables=h_pars["variables"],
+                                output_variables=[])
 
     # Format input
     sc_ens_train_f, sc_ens_test_f, _, _ = format_data(sc_ens_train,
@@ -152,20 +182,20 @@ if __name__ == "__main__":
                       input_size=len(sc_ens_train_f.columns),
                       layer_sizes=h_pars["layer_sizes"],
                       activations=h_pars["activations"],
-                      n_bins=h_pars["n_bins"]+1)
+                      n_bins=h_pars["n_bins"])
     model.compile(optimizer="adam",
-                  loss="categorical_crossentropy",
+                  loss=build_hen_crps(bin_edges),
                   metrics=["categorical_accuracy"])
 
     # Train model
     model.fit(x=sc_ens_train_f,
-              y=cat_obs_train,
+              y=obs_train,
               batch_size=h_pars["batch_size"],
               epochs=200,
               verbose=1,
               validation_freq=1,
               validation_split=0.1,
-              #callbacks=[EarlyStopping(monitor="val_loss",
+              # callbacks=[EarlyStopping(monitor="val_loss",
               #                         patience=h_pars["patience"],
               #                         restore_best_weights=True
               #                         )],
@@ -173,6 +203,8 @@ if __name__ == "__main__":
               )
 
     # Evaluate model
+    crps = build_hen_crps(bin_edges)
     train = DataFrame(index=sc_ens_train_f.index, data=model.predict(sc_ens_train_f))
     test = DataFrame(index=sc_ens_test_f.index, data=model.predict(sc_ens_test_f))
-    print("Evaluation", model.evaluate(x=sc_ens_test_f, y=cat_obs_test))
+    print("Evaluation - CRPS:", crps(obs_test.values, test.values).values)
+

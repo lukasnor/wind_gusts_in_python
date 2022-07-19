@@ -5,7 +5,7 @@ import tensorflow as tf
 from keras import Model, layers
 from keras.callbacks import EarlyStopping
 from scipy.special import binom
-from src.preprocessing import preprocess_data, format_data
+from preprocessing import preprocess_data, format_data
 
 # For plot formatting
 fontdict_title = {"fontweight": "bold", "fontsize": 24}
@@ -301,9 +301,11 @@ if __name__ == "__main__":
 
     # Import the data
     sc_ens_train, sc_ens_test, sc_obs_train, sc_obs_test, input_scalers, output_scalers \
-        = preprocess_data(horizon=h_pars["horizon"], train_variables=h_pars["variables"],
+        = preprocess_data(horizon=h_pars["horizon"],
+                          train_variables=h_pars["variables"],
                           train_split=h_pars["train_split"],
-                          input_variables=h_pars["variables"], output_variables=None)
+                          input_variables=h_pars["variables"],
+                          output_variables=None)
     obs_scaler = output_scalers["wind_power"]
     obs_max = obs_scaler.data_max_
     obs_min = obs_scaler.data_min_
@@ -321,7 +323,7 @@ if __name__ == "__main__":
 
     # Average over models
     models = []
-    for i in range(5):
+    for i in range(10):
         # Build model
         model = get_model(name="Foo" + str(i),
                           input_size=len(sc_ens_train_f.columns),

@@ -8,7 +8,7 @@ from keras_tuner import Hyperband
 
 from bqn import build_quantile_loss, build_crps_loss3, get_model, \
     average_models
-from src.preprocessing import preprocess_data, format_data
+from preprocessing import preprocess_data, format_data
 
 
 # Returns all sublists of list

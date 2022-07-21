@@ -1,7 +1,9 @@
 import numpy as np
+from numpy import ndarray
 import pandas as pd
 from pandas import DataFrame
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
+from keras.utils.np_utils import to_categorical
 
 
 # Methods for scaling features individually
@@ -37,6 +39,24 @@ def unscale(data: DataFrame, scaler_dict) -> DataFrame:
     return pd.concat(scaled_data, axis=1)
 
 
+def obs_to_bins(obs: DataFrame, bin_edges: ndarray) -> DataFrame:
+    helper_frame = pd.DataFrame(index=obs.index, columns=[*range(len(bin_edges))])
+    helper_frame[[*range(len(bin_edges))]] = bin_edges
+    return pd.concat([obs, helper_frame], axis=1) \
+               .rank(axis=1) \
+               .iloc[(slice(None), [0])] \
+               .astype("int") - 2  # -2 to get the index of the bin, first bin being 0
+
+
+def bins_to_categorical(binned_obs: DataFrame, num_classes) -> DataFrame:
+    return DataFrame(index=binned_obs.index, data=to_categorical(binned_obs, num_classes))
+
+
+def obs_to_categorical(obs: DataFrame, bin_edges: ndarray) -> DataFrame:
+    # bin edges is one longer than n_bins, but we need one more bin in the end for bigger values
+    return bins_to_categorical(obs_to_bins(obs, bin_edges), len(bin_edges))
+
+
 # Manuell nen Validation set auswählen?
 def import_data(horizon: int, variables: [str], train_split: float) -> (
         DataFrame, DataFrame, DataFrame, DataFrame):
@@ -56,7 +76,7 @@ def import_data(horizon: int, variables: [str], train_split: float) -> (
     #ensembles.index = ensembles.index.droplevel(0)
 
     # Split train and test set according to h_pars["train_split"]
-    possible_dates = observations.index.map(lambda d: d.ceil(freq="D")).intersection( \
+    possible_dates = observations.index.map(lambda d: d.ceil(freq="D")).intersection(
         observations.index.map(lambda d: d.floor(freq="D")))
     # round do even hour or stay if horizon =24
     dates = possible_dates.intersection(ensembles.index.get_level_values(0).unique().map(
@@ -239,6 +259,31 @@ def format_data(sc_ens_train: DataFrame,
     return sc_ens_train_f, sc_ens_test_f, sc_obs_train_f, sc_obs_test_f
 
 
+# Add the categorical data to the observations and inputs
+def categorify_data(sc_ens_train_f: DataFrame,
+                    sc_ens_test_f: DataFrame,
+                    sc_obs_train_f: DataFrame,
+                    sc_obs_test_f: DataFrame,
+                    bin_edges: np.ndarray) -> (DataFrame, DataFrame, DataFrame, DataFrame):
+    # For the training data, drop the last category, since no observation is outside the last bin
+    cat_ens_train = obs_to_categorical(sc_ens_train_f[["wind_power"]], bin_edges).iloc[:, :-1]
+    cat_obs_train = obs_to_categorical(sc_obs_train_f[["wind_power"]], bin_edges).iloc[:, :-1]
+    sc_ens_train_fc = pd.concat([sc_ens_train_f, cat_ens_train], axis=1)
+    sc_obs_train_fc = pd.concat([sc_obs_train_f, cat_obs_train], axis=1)
+
+    # For the test data, merge all the data bigger than the last bin_edge into the last bin
+    cat_ens_test = obs_to_categorical(sc_ens_test_f[["wind_power"]], bin_edges)
+    cat_ens_test.iloc[:, -2] = cat_ens_test.iloc[:, -2:].sum(axis=1)
+    cat_ens_test = cat_ens_test.iloc[:, :-1]
+    cat_obs_test = obs_to_categorical(sc_obs_test_f[["wind_power"]], bin_edges)
+    cat_obs_test.iloc[:, -2] = cat_obs_test.iloc[:, -2:].sum(axis=1)
+    cat_obs_test = cat_obs_test.iloc[:, :-1]
+    sc_ens_test_fc = pd.concat([sc_ens_test_f, cat_ens_test], axis=1)
+    sc_obs_test_fc = pd.concat([sc_obs_test_f, cat_obs_test], axis=1)
+
+    return sc_ens_train_fc, sc_ens_test_fc, sc_obs_train_fc, sc_obs_test_fc
+
+
 if __name__ == "__main__":
     h_pars = {"horizon": 3,
               "variables": ["t2m", "sp", "wind_power"],
@@ -261,7 +306,7 @@ if __name__ == "__main__":
     sc_ens_train_f, \
     sc_ens_test_f, \
     sc_obs_train_f, \
-    sc_obs_test_f = format_data(sc_ens_train, \
-                                sc_ens_test, \
-                                sc_obs_train, \
+    sc_obs_test_f = format_data(sc_ens_train,
+                                sc_ens_test,
+                                sc_obs_train,
                                 sc_obs_test, h_pars["aggregation"])

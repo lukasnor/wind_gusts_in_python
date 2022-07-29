@@ -253,7 +253,7 @@ def generate_pit_plot(obs: pd.DataFrame, quantiles: pd.DataFrame, name: str, n_b
     if path is None:
         plt.show()
     else:
-        plt.savefig(path + filename + "_" + str(i) + ".png")
+        plt.savefig(path + filename + ".png")
 
 
 # Path with a trailing "/"!

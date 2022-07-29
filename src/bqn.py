@@ -237,7 +237,7 @@ def generate_histogram_plot(obs: pd.DataFrame, f: pd.DataFrame, name: str, bins:
     if path is None:
         plt.show()
     else:
-        plt.savefig(path + filename + "_" + str(i) + ".png")
+        plt.savefig(path + filename + ".png")
 
 
 # Path with a trailing "/"!

@@ -5,7 +5,7 @@ from keras.models import Model
 from pandas import DataFrame
 import numpy as np
 from numpy import ndarray
-from src.preprocessing import format_data, import_data, scale_data, categorify_data
+from preprocessing import format_data, import_data, scale_data, categorify_data
 import tensorflow as tf
 from keras.metrics import categorical_crossentropy
 
@@ -96,7 +96,8 @@ def build_hen_crps(bin_edges: np.ndarray):
     return crps
 
 
-def wrapped_hen_crps(bin_edges: np.ndarray):
+# Build the hen crps for the observation data, in which the first column is the exact observation
+def build_wrapped_hen_crps(bin_edges: np.ndarray):
     crps_prime = build_hen_crps(bin_edges)
 
     def crps(y_true, y_pred):
@@ -105,11 +106,45 @@ def wrapped_hen_crps(bin_edges: np.ndarray):
     return crps
 
 
-def wrapped_crossentropy_loss():
+# build the crossentropy loss for the observation data, in which the second to last columns are the
+# categorical vectors of the observation
+def build_wrapped_crossentropy_loss():
     def loss(y_true, y_pred):
         return categorical_crossentropy(y_true[:, 1:], y_pred)
 
     return loss
+
+
+# Quantile function of a piecewise linear distribution function
+# alpha: ndarray with shape (k,) ; quantile levels between 0.0 and 1.0
+# bin_edges: ndarray with shape (m,) ; bin edges as floats
+# bin_probs: ndarray with shape (n,) ; bin probabilities between 0.0 and 1.0, summing to 1.0
+# returns ndarray with shape (k,) ; quantiles to the levels in alpha, numerically well-behaved
+def quantile_function(alpha: ndarray, bin_edges: ndarray, bin_probs: ndarray):
+    beta = np.expand_dims(alpha, 1)  # (k, 1)
+    f = np.expand_dims(bin_probs.cumsum(), 0)  # (1, m)
+    g = np.insert(bin_probs.cumsum(), 0, 0.0)[:-1]
+    booleans = beta>=f  # (k, m)
+    i = np.argmin(booleans, axis=1)  # (k,)
+    i[booleans[:, -1] == True] = len(bin_probs)-1  # needed for an all true row in booleans
+    return np.minimum(bin_edges[i] + (bin_edges[i + 1] - bin_edges[i]) * (
+                alpha - g[i]) / bin_probs[i], bin_edges[-1])
+
+
+def test_quantile_function():
+    bin_edges = np.array([1., 2., 3., 4.])
+    bin_probs = np.array([0.25, 0.5, 0.249])
+    alpha = np.array([0.0, 0.2, 0.25, 0.5, 0.75, 0.998, 0.999, 1.0])
+    qs = quantile_function(alpha, bin_edges, bin_probs)
+
+
+# Not ready yet
+def vincentivize_forecasts(bin_probs_list: [DataFrame]) -> DataFrame:
+    levels = pd.concat(map(lambda ps: ps.cumsum(axis=1).round(3), bin_probs_list), axis=1)
+    levels_sorted = DataFrame(np.sort(levels, axis=1), index=levels.index)
+    levels_sorted = DataFrame(
+        [levels_sorted.iloc[i, :].unique() for i in range(len(levels_sorted))],
+        index=levels_sorted.index)
 
 
 def generate_forecast_plots(y_true: pd.DataFrame, y_pred: pd.DataFrame, bin_edges: ndarray,
@@ -117,7 +152,7 @@ def generate_forecast_plots(y_true: pd.DataFrame, y_pred: pd.DataFrame, bin_edge
     pass
 
 
-if __name__ == "__main__":
+if __name__=="__main__":
 
     h_pars = {"horizon": 3,  #
               "variables": None,
@@ -199,33 +234,39 @@ if __name__ == "__main__":
     sc_ens_train_fc = sc_ens_train_fc.iloc[:, : (-1) * h_pars["n_bins"]]
     sc_ens_test_fc = sc_ens_test_fc.iloc[:, : (-1) * h_pars["n_bins"]]
 
-    # Build model
-    model = get_model("First_model",
-                      input_size=len(sc_ens_train_fc.columns),
-                      layer_sizes=h_pars["layer_sizes"],
-                      activations=h_pars["activations"],
-                      n_bins=h_pars["n_bins"])
-    model.compile(optimizer="adam",
-                  loss=wrapped_crossentropy_loss(),
-                  metrics=[wrapped_hen_crps(bin_edges)])
+    models = []
+    bin_probs_list = []
+    for _ in range(2):
+        # Build model
+        model = get_model("First_model",
+                          input_size=len(sc_ens_train_fc.columns),
+                          layer_sizes=h_pars["layer_sizes"],
+                          activations=h_pars["activations"],
+                          n_bins=h_pars["n_bins"])
+        model.compile(optimizer="adam",
+                      loss=build_wrapped_crossentropy_loss(),
+                      metrics=[build_wrapped_hen_crps(bin_edges)])
 
-    # Train model
-    model.fit(x=sc_ens_train_fc,
-              y=sc_obs_train_fc,
-              batch_size=h_pars["batch_size"],
-              epochs=200,
-              verbose=1,
-              validation_freq=1,
-              validation_split=0.1,
-              callbacks=[EarlyStopping(monitor="val_loss",
-                                       patience=h_pars["patience"],
-                                       restore_best_weights=True
-                                       )],
-              use_multiprocessing=True
-              )
+        # Train model
+        model.fit(x=sc_ens_train_fc,
+                  y=sc_obs_train_fc,
+                  batch_size=h_pars["batch_size"],
+                  epochs=20,
+                  verbose=1,
+                  validation_freq=1,
+                  validation_split=0.1,
+                  callbacks=[EarlyStopping(monitor="val_loss",
+                                           patience=h_pars["patience"],
+                                           restore_best_weights=True
+                                           )],
+                  use_multiprocessing=True
+                  )
 
-    # Evaluate model
-    crps = build_hen_crps(bin_edges)
-    train = DataFrame(index=sc_ens_train_fc.index, data=model.predict(sc_ens_train_fc))
-    test = DataFrame(index=sc_ens_test_fc.index, data=model.predict(sc_ens_test_fc))
-    print("Evaluation - CRPS:", crps(obs_test.values, test.values))
+        # Evaluate model
+        crps = build_hen_crps(bin_edges)
+        train = DataFrame(index=sc_ens_train_fc.index, data=model.predict(sc_ens_train_fc))
+        test = DataFrame(index=sc_ens_test_fc.index, data=model.predict(sc_ens_test_fc))
+        print("Evaluation - CRPS:", crps(obs_test.values, test.values))
+
+        models.append(model)
+        bin_probs_list.append(test)

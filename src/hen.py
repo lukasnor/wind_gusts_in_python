@@ -8,7 +8,12 @@ from numpy import ndarray
 from preprocessing import format_data, import_data, scale_data, categorify_data
 import tensorflow as tf
 from keras.metrics import categorical_crossentropy
+import matplotlib.pyplot as plt
 
+# For plot formatting
+fontdict_title = {"fontweight": "bold", "fontsize": 24}
+fontdict_axis = {"fontweight": "bold", "fontsize": 15}
+figsize = (13, 7)
 
 # For our data almost equivalent to using quantiles, at least for 20 bins
 # From the observations, obtain N+1 bin edges for N bins, excluding the last bin
@@ -123,36 +128,83 @@ def build_wrapped_crossentropy_loss():
 def quantile_function(alpha: ndarray, bin_edges: ndarray, bin_probs: ndarray):
     beta = np.expand_dims(alpha, 1)  # (k, 1)
     f = np.expand_dims(bin_probs.cumsum(), 0)  # (1, m)
-    g = np.insert(bin_probs.cumsum(), 0, 0.0)[:-1]
-    booleans = beta>=f  # (k, m)
+    g = np.insert(bin_probs.cumsum(), 0, 0.0)[:-1]  # (m,)
+    booleans = beta >= f  # (k, m)
     i = np.argmin(booleans, axis=1)  # (k,)
-    i[booleans[:, -1] == True] = len(bin_probs)-1  # needed for an all true row in booleans
+    i[booleans[:, -1] == True] = len(bin_probs) - 1  # needed for an all true row in booleans
     return np.minimum(bin_edges[i] + (bin_edges[i + 1] - bin_edges[i]) * (
-                alpha - g[i]) / bin_probs[i], bin_edges[-1])
+            alpha - g[i]) / bin_probs[i], bin_edges[-1])
+
+
+# MOOOOORE DIMENSIONSS!!!!
+# l levels, e edges, b bins, n instances, r runs
+# alpha: (l,)
+# bin_edges (e,)
+# bin_probs (b, n, r)
+# returns (l, n, r)
+def hyperquantile_function(alpha, bin_edges, bin_probs):
+    l = alpha.shape
+    e = bin_edges.shape
+    b, n, r = bin_probs.shape
+    beta = np.expand_dims(alpha, [1, 2, 3])  # (l, 1, 1, 1)
+    f = np.expand_dims(bin_probs.cumsum(axis=0), 0)  # (1, b, n, r)
+    g = np.insert(bin_probs.cumsum(axis=0), 0, 0.0, axis=0)[:-1, :, :]  # (b, n, r)
+    booleans = beta >= f  # (l, e, n, r)
+    i = np.argmin(booleans, axis=1)  # (l, n, r)
+    i[booleans[:, -1, :, :] == True] = b - 1
+    multiplier = (np.squeeze(beta, 1) - g[i].diagonal(0, 1, 3).diagonal(0, 1, 2)) \
+                 / bin_probs[i].diagonal(0, 1, 3).diagonal(0, 1, 2)  # (l, n, r)
+    return np.minimum(bin_edges[i] + (bin_edges[i + 1] - bin_edges[i]) * multiplier, bin_edges[-1])
 
 
 def test_quantile_function():
     bin_edges = np.array([1., 2., 3., 4.])
-    bin_probs = np.array([0.25, 0.5, 0.249])
+    bin_probs = np.array([0.25, 0.5, 0.249])  # does not sum to 1.0 on purpose to test stability
     alpha = np.array([0.0, 0.2, 0.25, 0.5, 0.75, 0.998, 0.999, 1.0])
     qs = quantile_function(alpha, bin_edges, bin_probs)
+    # expectation: [1.0, 1.8., 2.0, 2.5, 3.0, 3.9something, 4.0, 4.0]
 
 
 # Not ready yet
 def vincentivize_forecasts(bin_probs_list: [DataFrame]) -> DataFrame:
     levels = pd.concat(map(lambda ps: ps.cumsum(axis=1).round(3), bin_probs_list), axis=1)
+    levels["zero"] = 0.
+    levels["one"] = 1.  # to get the lowest and the highest bin edges!
     levels_sorted = DataFrame(np.sort(levels, axis=1), index=levels.index)
     levels_sorted = DataFrame(
         [levels_sorted.iloc[i, :].unique() for i in range(len(levels_sorted))],
         index=levels_sorted.index)
+    # levels_sorted.apply(axis=1, func=lambda alpha: np.mean(
+    #     [quantile_function(alpha, bin_edges, bin_probs) for bin_probs in bin_probs_list]))
+    new_bin_edges = pd.DataFrame(
+        [np.array(
+            [quantile_function(levels_sorted.iloc[i,:].dropna().values,
+                               bin_edges,
+                               bin_probs_list[j].iloc[i,:].values)
+             for j in range(len(bin_probs_list))]).mean(axis=0)
+         for i in range(len(levels_sorted))],
+        index=levels_sorted.index)
+    new_bin_probs = levels_sorted.diff(axis=1)
+    return new_bin_edges, new_bin_probs
 
+def generate_forecast_plots(obs: pd.DataFrame, bin_probs: pd.DataFrame, bin_edges: pd.DataFrame,
+                            name: str, n=None, path: str = None, filename: str = "forecast") -> None:
+    heights = bin_probs.iloc[:n, :] / bin_edges.iloc[:n, :].diff(axis=1)
+    for i in range(n):
+        plt.figure(figsize)
+        plt.vlines(x=obs.iloc[i, 0], ymin=0., ymax=heights.iloc[i, :].max(), colors="red")
+        plt.bar(x=bin_edges.iloc[i, :].dropna()[:-1],
+                height=heights.iloc[i, :].dropna(),
+                width=bin_edges.iloc[i, :].diff().dropna(),
+                align="edge",
+                edgecolor="grey")
+        plt.title(name, fontdict=fontdict_title)
+        if path is None:
+            plt.show()
+        else:
+            plt.savefig(path+filename+"_"+str(i)+".png")
 
-def generate_forecast_plots(y_true: pd.DataFrame, y_pred: pd.DataFrame, bin_edges: ndarray,
-                            name: str, n=None, path: str = None) -> None:
-    pass
-
-
-if __name__=="__main__":
+if __name__ == "__main__":
 
     h_pars = {"horizon": 3,  #
               "variables": None,
@@ -270,3 +322,5 @@ if __name__=="__main__":
 
         models.append(model)
         bin_probs_list.append(test)
+
+    new_bin_edges, new_bin_probs = vincentivize_forecasts(bin_probs_list)

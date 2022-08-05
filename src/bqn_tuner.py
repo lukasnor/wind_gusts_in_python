@@ -120,7 +120,7 @@ def run_tuner():
             # Get the three optimal hyperparameter sets, and compare them
             best_hps_candidates = tuner.get_best_hyperparameters(num_trials=3)
             best_model_candidates = []
-            # For each set of hps, average model over 3 runs
+            # For each set of hps, average model over 10 runs
             for hp in best_hps_candidates:
                 n_runs = 10
                 print(hp.values)

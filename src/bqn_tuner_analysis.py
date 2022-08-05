@@ -65,8 +65,10 @@ def evaluate_best_hps():
                               columns=["run" + str(i + 1) for i in range(n_runs)] + ["average"])
 
     fixed_params = {"variables": variables, "train_split": 0.85, "patience": 27}
-    # horizons =[3]
+    # horizons = [12]
     # aggregations = ["single"]
+    # evaluation = pd.read_csv("../results/bqn/crps_evaluation.csv").pivot(
+    #     index=["horizon", "aggregation"], columns=[])
     for horizon in horizons:
         fixed_params["horizon"] = horizon
         # Import data
@@ -184,15 +186,15 @@ def evaluate_best_hps():
 
 
 def plot_crps_per_horizon_per_aggregation(plots_path=None):
-    evaluation = pd.read_csv("../results/bqn/crps_evaluation.csv")
-    evaluation = evaluation.reset_index().pivot(index=["horizon", "aggregation"], columns=[])
-    evaluation = evaluation[evaluation.columns.drop("index")]
+    evaluation = pd.read_csv("../results/bqn/crps_evaluation.csv").pivot(
+        index=["horizon", "aggregation"], columns=[])
+    n_runs = len(evaluation.columns)-1
     for aggregation in aggregations:
         with plt.xkcd():
             plt.figure(figsize=figsize)
             plt.scatter([[horizon for _ in range(5)] for horizon in horizons],
-                        evaluation.loc[(slice(None), aggregation), :"run5"].values, c="blue",
-                        label="individual")
+                        evaluation.loc[(slice(None), aggregation), :"run"+str(n_runs)].values,
+                        c="blue", label="individual")
             plt.scatter(horizons, evaluation.loc[(slice(None), aggregation), "average"], c="red",
                         label="average")
             plt.legend()
@@ -361,9 +363,9 @@ def analyze_first_coefficient(plots_path=None):
 
 if __name__ == "__main__":
     plots_path = "../results/bqn/plots/"
-    plot_rank_histograms_and_forecasts()
+    # evaluate_best_hps()
+    # plot_rank_histograms_and_forecasts()
     # plot_crps_per_horizon_per_aggregation(plots_path)
     # plot_crps_per_horizon(plots_path)
     # plot_crps_per_aggregation(plots_path)
-    # evaluate_best_hps()
     # analyze_first_coefficient(plots_path)

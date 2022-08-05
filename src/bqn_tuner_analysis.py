@@ -192,7 +192,7 @@ def plot_crps_per_horizon_per_aggregation(plots_path=None):
     for aggregation in aggregations:
         with plt.xkcd():
             plt.figure(figsize=figsize)
-            plt.scatter([[horizon for _ in range(5)] for horizon in horizons],
+            plt.scatter([[horizon for _ in range(n_runs)] for horizon in horizons],
                         evaluation.loc[(slice(None), aggregation), :"run"+str(n_runs)].values,
                         c="blue", label="individual")
             plt.scatter(horizons, evaluation.loc[(slice(None), aggregation), "average"], c="red",

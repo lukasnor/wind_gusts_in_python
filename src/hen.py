@@ -15,6 +15,7 @@ fontdict_title = {"fontweight": "bold", "fontsize": 24}
 fontdict_axis = {"fontweight": "bold", "fontsize": 15}
 figsize = (13, 7)
 
+
 # For our data almost equivalent to using quantiles, at least for 20 bins
 # From the observations, obtain N+1 bin edges for N bins, excluding the last bin
 def binning_scheme(obs: DataFrame, N: int) -> ndarray:
@@ -111,6 +112,17 @@ def build_wrapped_hen_crps(bin_edges: np.ndarray):
     return crps
 
 
+# CRPS for evaluation only, i.e. not for training
+# Takes into account different bin edges for each forecast
+def evaluation_crps(obs: DataFrame, bin_probs: DataFrame, bin_edges: DataFrame):
+    crpss = np.array(
+        [build_hen_crps(bin_edges.iloc[i, :].dropna())
+         (np.expand_dims(obs.iloc[i], 0).astype("float32"),
+          np.expand_dims(bin_probs.iloc[i, :].dropna(), 0).astype("float32"))
+         for i in range(len(obs))])
+    return crpss.mean()
+
+
 # build the crossentropy loss for the observation data, in which the second to last columns are the
 # categorical vectors of the observation
 def build_wrapped_crossentropy_loss():
@@ -166,43 +178,48 @@ def test_quantile_function():
 
 
 # Not ready yet
-def vincentivize_forecasts(bin_probs_list: [DataFrame]) -> DataFrame:
-    levels = pd.concat(map(lambda ps: ps.cumsum(axis=1).round(3), bin_probs_list), axis=1)
+def vincentize_forecasts(bin_probs_list: [DataFrame], rounding: int = 3) -> DataFrame:
+    levels = pd.concat(map(lambda ps: ps.cumsum(axis=1).round(rounding), bin_probs_list), axis=1)
     levels["zero"] = 0.
     levels["one"] = 1.  # to get the lowest and the highest bin edges!
     levels_sorted = DataFrame(np.sort(levels, axis=1), index=levels.index)
     levels_sorted = DataFrame(
         [levels_sorted.iloc[i, :].unique() for i in range(len(levels_sorted))],
         index=levels_sorted.index)
-    # levels_sorted.apply(axis=1, func=lambda alpha: np.mean(
-    #     [quantile_function(alpha, bin_edges, bin_probs) for bin_probs in bin_probs_list]))
     new_bin_edges = pd.DataFrame(
         [np.array(
-            [quantile_function(levels_sorted.iloc[i,:].dropna().values,
+            [quantile_function(levels_sorted.iloc[i, :].dropna().values,
                                bin_edges,
-                               bin_probs_list[j].iloc[i,:].values)
+                               bin_probs_list[j].iloc[i, :].values)
              for j in range(len(bin_probs_list))]).mean(axis=0)
          for i in range(len(levels_sorted))],
         index=levels_sorted.index)
     new_bin_probs = levels_sorted.diff(axis=1)
     return new_bin_edges, new_bin_probs
 
+
 def generate_forecast_plots(obs: pd.DataFrame, bin_probs: pd.DataFrame, bin_edges: pd.DataFrame,
-                            name: str, n=None, path: str = None, filename: str = "forecast") -> None:
+                            name: str, n=None, path: str = None,
+                            filename: str = "forecast") -> None:
     heights = bin_probs.iloc[:n, :] / bin_edges.iloc[:n, :].diff(axis=1)
     for i in range(n):
-        plt.figure(figsize)
+        plt.figure(figsize=figsize)
         plt.vlines(x=obs.iloc[i, 0], ymin=0., ymax=heights.iloc[i, :].max(), colors="red")
         plt.bar(x=bin_edges.iloc[i, :].dropna()[:-1],
                 height=heights.iloc[i, :].dropna(),
                 width=bin_edges.iloc[i, :].diff().dropna(),
-                align="edge",
-                edgecolor="grey")
+                align="edge")
         plt.title(name, fontdict=fontdict_title)
         if path is None:
             plt.show()
         else:
-            plt.savefig(path+filename+"_"+str(i)+".png")
+            plt.savefig(path + filename + "_" + str(i) + ".png")
+
+
+def generate_histogram_plots(obs: DataFrame, bin_probs: DataFrame, bin_edges: DataFrame,
+                             name: str, path: str = None, filename: str = "rankhistogram") -> None:
+    pass
+
 
 if __name__ == "__main__":
 
@@ -288,7 +305,7 @@ if __name__ == "__main__":
 
     models = []
     bin_probs_list = []
-    for _ in range(2):
+    for _ in range(10):
         # Build model
         model = get_model("First_model",
                           input_size=len(sc_ens_train_fc.columns),
@@ -303,7 +320,7 @@ if __name__ == "__main__":
         model.fit(x=sc_ens_train_fc,
                   y=sc_obs_train_fc,
                   batch_size=h_pars["batch_size"],
-                  epochs=20,
+                  epochs=200,
                   verbose=1,
                   validation_freq=1,
                   validation_split=0.1,
@@ -323,4 +340,6 @@ if __name__ == "__main__":
         models.append(model)
         bin_probs_list.append(test)
 
-    new_bin_edges, new_bin_probs = vincentivize_forecasts(bin_probs_list)
+    new_bin_edges, new_bin_probs = vincentize_forecasts(bin_probs_list, rounding=2)
+    print("Vincentized CRPS:", evaluation_crps(obs_test, new_bin_probs, new_bin_edges))
+    generate_forecast_plots(obs_test, new_bin_probs, new_bin_edges, "Forecasts", n=10)

@@ -6,6 +6,7 @@ from pandas import DataFrame
 import numpy as np
 from numpy import ndarray
 from preprocessing import format_data, import_data, scale_data, categorify_data
+from bqn import get_rank
 import tensorflow as tf
 from keras.metrics import categorical_crossentropy
 import matplotlib.pyplot as plt
@@ -177,7 +178,7 @@ def test_quantile_function():
     # expectation: [1.0, 1.8., 2.0, 2.5, 3.0, 3.9something, 4.0, 4.0]
 
 
-# Not ready yet
+# Vincentize the forecasted probabilities in bin_probs_list
 def vincentize_forecasts(bin_probs_list: [DataFrame], rounding: int = 3) -> DataFrame:
     levels = pd.concat(map(lambda ps: ps.cumsum(axis=1).round(rounding), bin_probs_list), axis=1)
     levels["zero"] = 0.
@@ -197,7 +198,8 @@ def vincentize_forecasts(bin_probs_list: [DataFrame], rounding: int = 3) -> Data
     new_bin_probs = levels_sorted.diff(axis=1)
     return new_bin_edges, new_bin_probs
 
-
+# Path with a trailing "/"!
+# Plot the histogram forecast as a histogram
 def generate_forecast_plots(obs: pd.DataFrame, bin_probs: pd.DataFrame, bin_edges: pd.DataFrame,
                             name: str, n=None, path: str = None,
                             filename: str = "forecast") -> None:
@@ -215,10 +217,54 @@ def generate_forecast_plots(obs: pd.DataFrame, bin_probs: pd.DataFrame, bin_edge
         else:
             plt.savefig(path + filename + "_" + str(i) + ".png")
 
+# Path with a trailing "/"!
+# Plot the histogram forecast as a cdf
+def generate_forecast_plots_2(obs: DataFrame, bin_probs: DataFrame, bin_edges: DataFrame,
+                              quantile_levels: np.ndarray, name: str, n=None, path: str = None,
+                            filename: str = "forecast") -> None:
+    q = DataFrame(
+        [quantile_function(quantile_levels, bin_edges.iloc[i].dropna().values, bin_probs.iloc[i].dropna().values)
+         for i in range(len(bin_edges))], index=bin_edges.index)
+    if n is None:
+        n = obs.shape[0]
+    for i in range(n):
+        plt.figure(figsize=figsize)
+        plt.plot(q.iloc[(i, slice(None))], quantile_levels, color="blue", label="forecast")
+        plt.vlines(obs.iloc[i], ymin=quantile_levels.min(), ymax=quantile_levels.max(),
+                   label="observation", color="red", linestyles="dashed")
+        plt.xlim(left=0.0, right=max(1.0, plt.axis()[1]))
+        plt.title(name + " - Forecast " + str(i), fontdict=fontdict_title)
+        plt.legend()
+        if path is None:
+            plt.show()
+        else:
+            plt.savefig(path + filename + "_" + str(i) + ".png")
 
-def generate_histogram_plots(obs: DataFrame, bin_probs: DataFrame, bin_edges: DataFrame,
-                             name: str, path: str = None, filename: str = "rankhistogram") -> None:
-    pass
+# Path with a trailing "/"!
+# Generate a rank histogram for forecasts
+def generate_histogram_plot(obs: DataFrame, bin_probs: DataFrame, bin_edges: DataFrame, name: str,
+                            bins: int = 10, path: str = None,
+                            filename: str = "rankhistogram") -> None:
+    if bins < 2:
+        raise Exception(
+            "More than one bin is necessary for a sensible rank histogram. 'bins' = " + str(bins))
+    quantile_levels = np.linspace(1 / bins, 1, bins - 1, False)  # Quantile levels / inner bin walls
+    quantiles = DataFrame(
+        [quantile_function(quantile_levels, bin_edges.iloc[i].dropna().values, bin_probs.iloc[i].dropna().values)
+         for i in range(len(bin_edges))], index=bin_edges.index)
+    ranks = get_rank(obs, quantiles)
+    plt.figure(figsize=figsize)
+    plt.hist(ranks, bins=np.arange(0.5, bins + 1), weights=np.ones_like(ranks) / ranks.size)
+    plt.hlines(1 / bins, linestyles="dashed", color="grey", xmin=0.5, xmax=bins + 0.5)
+    # TODO: y-achse bis festen Wert 0.5 z.B. für Vergleichbarkeit
+    plt.xlabel("Ranks", fontdict=fontdict_axis)
+    plt.xticks(np.arange(1, bins + 1), np.arange(1, bins + 1))
+    plt.ylim(bottom=0, top=0.25)
+    plt.title(name, fontdict=fontdict_title)
+    if path is None:
+        plt.show()
+    else:
+        plt.savefig(path + filename + ".png")
 
 
 if __name__ == "__main__":
@@ -253,18 +299,6 @@ if __name__ == "__main__":
 
     # Get the bin edges
     bin_edges = binning_scheme(obs_train, h_pars["n_bins"])
-
-    # # Make observations categorical
-    # # drop last category, since no train value is outside last bin
-    # cat_obs_train = obs_to_categorical(obs_train, bin_edges).iloc[:, :-1]
-    # # Merge outliers into the last bin in the test data
-    # cat_obs_test = obs_to_categorical(obs_test, bin_edges)
-    # cat_obs_test.iloc[:, -2] = cat_obs_test.iloc[:, -2:].sum(axis=1)
-    # cat_obs_test = cat_obs_test.iloc[:, :-1]
-    #
-    # # Merge numerical and categorical observations
-    # merged_obs_train = pd.concat([obs_train, cat_obs_train], axis=1)
-    # merged_obs_test = pd.concat([obs_test, cat_obs_test], axis=1)
 
     # Scale the input
     sc_ens_train, \
@@ -340,6 +374,14 @@ if __name__ == "__main__":
         models.append(model)
         bin_probs_list.append(test)
 
+    # Evaluate the aggregated model
     new_bin_edges, new_bin_probs = vincentize_forecasts(bin_probs_list, rounding=2)
     print("Vincentized CRPS:", evaluation_crps(obs_test, new_bin_probs, new_bin_edges))
     generate_forecast_plots(obs_test, new_bin_probs, new_bin_edges, "Forecasts", n=10)
+    with plt.xkcd():
+        generate_histogram_plot(obs_test,
+                                new_bin_probs,
+                                new_bin_edges,
+                                "Rank Histogram - Test data\n" + "Horizon " + str(
+                                    h_pars["horizon"]) + " - Aggregation " + h_pars["aggregation"],
+                                21)

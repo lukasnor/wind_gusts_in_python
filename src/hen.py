@@ -179,7 +179,7 @@ def test_quantile_function():
 
 
 # Vincentize the forecasted probabilities in bin_probs_list
-def vincentize_forecasts(bin_probs_list: [DataFrame], rounding: int = 3) -> DataFrame:
+def vincentize_forecasts(bin_edges, bin_probs_list: [DataFrame], rounding: int = 3) -> DataFrame:
     levels = pd.concat(map(lambda ps: ps.cumsum(axis=1).round(rounding), bin_probs_list), axis=1)
     levels["zero"] = 0.
     levels["one"] = 1.  # to get the lowest and the highest bin edges!
@@ -280,7 +280,7 @@ if __name__ == "__main__":
 
               "aggregation": "mean",
               "n_bins": 20,
-              "layer_sizes": [30, 20, 20],
+              "layer_sizes": [20, 20],
               "activations": ["selu", "selu", "selu"],
 
               "batch_size": 25,
@@ -380,7 +380,7 @@ if __name__ == "__main__":
         bin_probs_list.append(test)
 
     # Evaluate the aggregated model
-    new_bin_edges, new_bin_probs = vincentize_forecasts(bin_probs_list, rounding=2)
+    new_bin_edges, new_bin_probs = vincentize_forecasts(bin_edges, bin_probs_list, rounding=2)
     print("Vincentized CRPS:", evaluation_crps(obs_test, new_bin_probs, new_bin_edges))
 
     # Generate forecast plots and a histogram plot

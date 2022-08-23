@@ -160,8 +160,8 @@ def run_tuner():
                     print("Training of ", model.name)
 
                     # Train run of a model
-                    model.fit(x=sc_ens_train_f,
-                              y=sc_obs_train_f,
+                    model.fit(x=sc_ens_train_fc,
+                              y=sc_obs_train_fc,
                               batch_size=hp["batch_size"],
                               epochs=300,
                               verbose=1,

@@ -222,7 +222,7 @@ def generate_histogram_plot(obs: pd.DataFrame, f: pd.DataFrame, name: str, bins:
                             path: str = None, filename: str = "rankhistogram") -> None:
     if bins < 2:
         raise Exception(
-            "More than one bin is necessary for a sensable rank histogram. 'bins' = " + str(bins))
+            "More than one bin is necessary for a sensible rank histogram. 'bins' = " + str(bins))
     quantile_levels = np.linspace(1 / bins, 1, bins - 1, False)  # Quantile levels / inner bin walls
     quantiles = get_quantiles(f, quantile_levels)
     ranks = get_rank(obs, quantiles)
@@ -309,8 +309,8 @@ if __name__ == "__main__":
     obs_scaler = output_scalers["wind_power"]
     obs_max = obs_scaler.data_max_
     obs_min = obs_scaler.data_min_
-    #obs_max = 1.0
-    #obs_min = 0.0
+    # obs_max = 1.0
+    # obs_min = 0.0
     # Format the data
     sc_ens_train_f, \
     sc_ens_test_f, \
@@ -386,11 +386,11 @@ if __name__ == "__main__":
     average_model = average_models(models, name="average_model")
     average_model.compile(loss=build_crps_loss3(h_pars["degree"], obs_min, obs_max),
                           optimizer="adam")
+
     # Evaluate the averaged model
     average_model.evaluate(x=sc_ens_test_f, y=sc_obs_test_f)
     test = pd.DataFrame(average_model.predict(sc_ens_test_f), index=sc_ens_test_f.index)
     with plt.xkcd():
-        generate_histogram_plot(sc_obs_test_f, test,
-                                "Rank Histogram - Test data\n" + "Horizon " + str(
-                                    h_pars["horizon"]) + " - Aggregation " + h_pars["aggregation"],
-                                21)
+        title = "Rank Histogram - Test data\n" + "Horizon " + str(
+            h_pars["horizon"]) + " - Aggregation " + h_pars["aggregation"]
+        generate_histogram_plot(sc_obs_test_f, test, title, 21)

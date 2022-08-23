@@ -160,6 +160,7 @@ def run_tuner():
 
             print(best_hps)
             print(evaluations[best_index])
+
             # Save the best hps
             with open("../results/bqn/hps/horizon:" + str(horizon) + "_agg:" + str(
                     aggregation) + ".json", "w") as file:

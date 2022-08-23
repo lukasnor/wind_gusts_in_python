@@ -19,7 +19,7 @@ def scale(data: DataFrame, scaler_dict) -> DataFrame:
     scaled_data = []
     for column in data.columns:
         if column in scaler_dict:
-            scaled_np_column = scaler_dict[column].transform(data[column].values.reshape(-1, 1))
+            scaled_np_column = scaler_dict[column].transform(data[column].values.reshape(-1, 1))  # the reshape is needed, otherwise scikit complains
             scaled_data.append(DataFrame(scaled_np_column, index=data.index, columns=[column]))
         else:
             scaled_data.append(data[column])

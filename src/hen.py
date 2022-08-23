@@ -198,6 +198,7 @@ def vincentize_forecasts(bin_probs_list: [DataFrame], rounding: int = 3) -> Data
     new_bin_probs = levels_sorted.diff(axis=1)
     return new_bin_edges, new_bin_probs
 
+
 # Path with a trailing "/"!
 # Plot the histogram forecast as a histogram
 def generate_forecast_plots(obs: pd.DataFrame, bin_probs: pd.DataFrame, bin_edges: pd.DataFrame,
@@ -217,13 +218,15 @@ def generate_forecast_plots(obs: pd.DataFrame, bin_probs: pd.DataFrame, bin_edge
         else:
             plt.savefig(path + filename + "_" + str(i) + ".png")
 
+
 # Path with a trailing "/"!
 # Plot the histogram forecast as a cdf
 def generate_forecast_plots_2(obs: DataFrame, bin_probs: DataFrame, bin_edges: DataFrame,
                               quantile_levels: np.ndarray, name: str, n=None, path: str = None,
-                            filename: str = "forecast") -> None:
+                              filename: str = "forecast") -> None:
     q = DataFrame(
-        [quantile_function(quantile_levels, bin_edges.iloc[i].dropna().values, bin_probs.iloc[i].dropna().values)
+        [quantile_function(quantile_levels, bin_edges.iloc[i].dropna().values,
+                           bin_probs.iloc[i].dropna().values)
          for i in range(len(bin_edges))], index=bin_edges.index)
     if n is None:
         n = obs.shape[0]
@@ -240,6 +243,7 @@ def generate_forecast_plots_2(obs: DataFrame, bin_probs: DataFrame, bin_edges: D
         else:
             plt.savefig(path + filename + "_" + str(i) + ".png")
 
+
 # Path with a trailing "/"!
 # Generate a rank histogram for forecasts
 def generate_histogram_plot(obs: DataFrame, bin_probs: DataFrame, bin_edges: DataFrame, name: str,
@@ -250,7 +254,8 @@ def generate_histogram_plot(obs: DataFrame, bin_probs: DataFrame, bin_edges: Dat
             "More than one bin is necessary for a sensible rank histogram. 'bins' = " + str(bins))
     quantile_levels = np.linspace(1 / bins, 1, bins - 1, False)  # Quantile levels / inner bin walls
     quantiles = DataFrame(
-        [quantile_function(quantile_levels, bin_edges.iloc[i].dropna().values, bin_probs.iloc[i].dropna().values)
+        [quantile_function(quantile_levels, bin_edges.iloc[i].dropna().values,
+                           bin_probs.iloc[i].dropna().values)
          for i in range(len(bin_edges))], index=bin_edges.index)
     ranks = get_rank(obs, quantiles)
     plt.figure(figsize=figsize)
@@ -377,11 +382,10 @@ if __name__ == "__main__":
     # Evaluate the aggregated model
     new_bin_edges, new_bin_probs = vincentize_forecasts(bin_probs_list, rounding=2)
     print("Vincentized CRPS:", evaluation_crps(obs_test, new_bin_probs, new_bin_edges))
+
+    # Generate forecast plots and a histogram plot
     generate_forecast_plots(obs_test, new_bin_probs, new_bin_edges, "Forecasts", n=10)
     with plt.xkcd():
-        generate_histogram_plot(obs_test,
-                                new_bin_probs,
-                                new_bin_edges,
-                                "Rank Histogram - Test data\n" + "Horizon " + str(
-                                    h_pars["horizon"]) + " - Aggregation " + h_pars["aggregation"],
-                                21)
+        title = "Rank Histogram - Test data\n" + "Horizon " + str(
+            h_pars["horizon"]) + " - Aggregation " + h_pars["aggregation"]
+        generate_histogram_plot(obs_test, new_bin_probs, new_bin_edges, title, 21)

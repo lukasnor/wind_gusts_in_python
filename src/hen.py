@@ -115,6 +115,7 @@ def build_wrapped_hen_crps(bin_edges: np.ndarray):
 
 # CRPS for evaluation only, i.e. not for training
 # Takes into account different bin edges for each forecast
+# Quite slow sadly
 def evaluation_crps(obs: DataFrame, bin_probs: DataFrame, bin_edges: DataFrame):
     crpss = np.array(
         [build_hen_crps(bin_edges.iloc[i, :].dropna())
@@ -145,8 +146,9 @@ def quantile_function(alpha: ndarray, bin_edges: ndarray, bin_probs: ndarray):
     booleans = beta >= f  # (k, m)
     i = np.argmin(booleans, axis=1)  # (k,)
     i[booleans[:, -1] == True] = len(bin_probs) - 1  # needed for an all true row in booleans
+    eps = np.array([1e-32])  # needed, so that if alpha - g[i] = 0, dividing by zero defaults to inf and not nan
     return np.minimum(bin_edges[i] + (bin_edges[i + 1] - bin_edges[i]) * (
-            alpha - g[i]) / bin_probs[i], bin_edges[-1])
+            alpha - g[i] + eps) / bin_probs[i], bin_edges[-1])
 
 
 # MOOOOORE DIMENSIONSS!!!!
@@ -278,7 +280,7 @@ if __name__ == "__main__":
               "variables": None,
               "train_split": 0.85,
 
-              "aggregation": "mean",
+              "aggregation": "all",
               "n_bins": 20,
               "layer_sizes": [20, 20],
               "activations": ["selu", "selu", "selu"],
@@ -293,6 +295,12 @@ if __name__ == "__main__":
     # Default value for variables is 'using all variables'
     if h_pars["variables"] is None:
         h_pars["variables"] = ["u100", "v100", "t2m", "sp", "speed", "wind_power"]
+    # Default values for batch_size for aggregations "mean", "mean+std", "all" are 25 and
+    # 500 for "single" and "single+std"
+    if h_pars["aggregation"] in ["single", "single+std"]:
+        h_pars["batch_size"] = 500
+    else:
+        h_pars["batch_size"] = 25
 
     # Import the data
     ens_train, \
@@ -343,6 +351,7 @@ if __name__ == "__main__":
     sc_ens_test_fc = sc_ens_test_fc.iloc[:, : (-1) * h_pars["n_bins"]]
 
     models = []
+    evaluations = []
     bin_probs_list = []
     for _ in range(10):
         # Build model
@@ -374,18 +383,22 @@ if __name__ == "__main__":
         crps = build_hen_crps(bin_edges)
         train = DataFrame(index=sc_ens_train_fc.index, data=model.predict(sc_ens_train_fc))
         test = DataFrame(index=sc_ens_test_fc.index, data=model.predict(sc_ens_test_fc))
-        print("Evaluation - CRPS:", crps(obs_test.values, test.values))
+        evaluation = crps(sc_obs_test_f.values, test.values)
+        print("Evaluation - CRPS:", evaluation)
 
         models.append(model)
+        evaluations.append(evaluation.numpy())
         bin_probs_list.append(test)
 
     # Evaluate the aggregated model
-    new_bin_edges, new_bin_probs = vincentize_forecasts(bin_edges, bin_probs_list, rounding=2)
-    print("Vincentized CRPS:", evaluation_crps(obs_test, new_bin_probs, new_bin_edges))
+    new_bin_edges, new_bin_probs = vincentize_forecasts(bin_edges, bin_probs_list, rounding=3)
+    print("Individuale evaluations:", evaluations)
+    print("Vincentized CRPS:", evaluation_crps(sc_obs_test_f, new_bin_probs, new_bin_edges))
+
 
     # Generate forecast plots and a histogram plot
-    generate_forecast_plots(obs_test, new_bin_probs, new_bin_edges, "Forecasts", n=10)
+    generate_forecast_plots(sc_obs_test_f, new_bin_probs, new_bin_edges, "Forecasts", n=10)
     with plt.xkcd():
         title = "Rank Histogram - Test data\n" + "Horizon " + str(
             h_pars["horizon"]) + " - Aggregation " + h_pars["aggregation"]
-        generate_histogram_plot(obs_test, new_bin_probs, new_bin_edges, title, 21)
+        generate_histogram_plot(sc_obs_test_f, new_bin_probs, new_bin_edges, title, 21)

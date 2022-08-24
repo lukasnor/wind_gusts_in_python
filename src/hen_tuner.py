@@ -179,8 +179,8 @@ def run_tuner():
                     bin_probs_list.append(bin_probs_forecast)
 
                 # Evaluate runs together
-                new_bin_edges, new_bin_probs = vincentize_forecasts(bin_edges, bin_probs_list, rounding=2)
-                crps_value = evaluation_crps(obs_test, new_bin_probs, new_bin_edges)
+                new_bin_edges, new_bin_probs = vincentize_forecasts(bin_edges, bin_probs_list, rounding=3)
+                crps_value = evaluation_crps(sc_obs_test_f, new_bin_probs, new_bin_edges)
                 evaluations.append(crps_value)
 
             # Find the best hps

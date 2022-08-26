@@ -146,7 +146,8 @@ def quantile_function(alpha: ndarray, bin_edges: ndarray, bin_probs: ndarray):
     booleans = beta >= f  # (k, m)
     i = np.argmin(booleans, axis=1)  # (k,)
     i[booleans[:, -1] == True] = len(bin_probs) - 1  # needed for an all true row in booleans
-    eps = np.array([1e-32])  # needed, so that if alpha - g[i] = 0, dividing by zero defaults to inf and not nan
+    eps = np.array([
+                       1e-32])  # needed, so that if alpha - g[i] = 0, dividing by zero defaults to inf and not nan
     return np.minimum(bin_edges[i] + (bin_edges[i + 1] - bin_edges[i]) * (
             alpha - g[i] + eps) / bin_probs[i], bin_edges[-1])
 
@@ -181,7 +182,9 @@ def test_quantile_function():
 
 
 # Vincentize the forecasted probabilities in bin_probs_list
-def vincentize_forecasts(bin_edges, bin_probs_list: [DataFrame], rounding: int = 3) -> DataFrame:
+def vincentize_forecasts(bin_edges,
+                         bin_probs_list: [DataFrame],
+                         rounding: int = 3) -> (DataFrame, DataFrame):
     levels = pd.concat(map(lambda ps: ps.cumsum(axis=1).round(rounding), bin_probs_list), axis=1)
     levels["zero"] = 0.
     levels["one"] = 1.  # to get the lowest and the highest bin edges!
@@ -353,7 +356,7 @@ if __name__ == "__main__":
     models = []
     evaluations = []
     bin_probs_list = []
-    for _ in range(10):
+    for _ in range(3):
         # Build model
         model = get_model("First_model",
                           input_size=len(sc_ens_train_fc.columns),
@@ -383,11 +386,11 @@ if __name__ == "__main__":
         crps = build_hen_crps(bin_edges)
         train = DataFrame(index=sc_ens_train_fc.index, data=model.predict(sc_ens_train_fc))
         test = DataFrame(index=sc_ens_test_fc.index, data=model.predict(sc_ens_test_fc))
-        evaluation = crps(sc_obs_test_f.values, test.values)
+        evaluation = crps(sc_obs_test_f.values, test.values).numpy()
         print("Evaluation - CRPS:", evaluation)
 
         models.append(model)
-        evaluations.append(evaluation.numpy())
+        evaluations.append(evaluation)
         bin_probs_list.append(test)
 
     # Evaluate the aggregated model
@@ -395,9 +398,12 @@ if __name__ == "__main__":
     print("Individuale evaluations:", evaluations)
     print("Vincentized CRPS:", evaluation_crps(sc_obs_test_f, new_bin_probs, new_bin_edges))
 
-
     # Generate forecast plots and a histogram plot
-    generate_forecast_plots(sc_obs_test_f, new_bin_probs, new_bin_edges, "Forecasts", n=10)
+    generate_forecast_plots(obs=sc_obs_test_f,
+                            bin_probs=new_bin_probs,
+                            bin_edges=new_bin_edges,
+                            name="Forecast Plot",
+                            n=10)
     with plt.xkcd():
         title = "Rank Histogram - Test data\n" + "Horizon " + str(
             h_pars["horizon"]) + " - Aggregation " + h_pars["aggregation"]

@@ -11,6 +11,8 @@ from keras.optimizer_v2 import adam
 from bqn import get_model, build_quantile_loss, build_crps_loss3, average_models, \
     generate_forecast_plots, generate_histogram_plot
 from preprocessing import preprocess_data, format_data
+from tuner_helper import plot_crps_per_horizon_per_aggregation, plot_crps_per_aggregation, \
+    plot_crps_per_horizon, load_hyperparameters_from_folders
 
 # For plot formatting
 fontdict_title = {"fontweight": "bold", "fontsize": 24}
@@ -33,18 +35,6 @@ def generate_simple_plot(df, x, y):
     plt.ylabel(y, fontdict=fontdict_axis)
     plt.title(x + " vs " + y, fontdict=fontdict_title)
     plt.show()
-
-
-def load_hyperparameters_from_folders(path: str) -> pd.DataFrame:
-    hps_list = []
-    for horizon, aggregation in product(horizons, aggregations):
-        with open(path + "horizon:" + str(horizon) + "_agg:" + str(aggregation) + ".json",
-                  "r") as file:
-            hps_list.append(json.load(file))
-
-    hps = pd.DataFrame(hps_list)
-    hps = hps.pivot(index=["horizon", "aggregation"], columns=[])
-    return hps
 
 
 def analysis_by_plots():
@@ -185,67 +175,6 @@ def evaluate_best_hps():
     evaluation.to_csv("../results/bqn/crps_evaluation.csv")
 
 
-def plot_crps_per_horizon_per_aggregation(plots_path=None):
-    evaluation = pd.read_csv("../results/bqn/crps_evaluation.csv").pivot(
-        index=["horizon", "aggregation"], columns=[])
-    n_runs = len(evaluation.columns)-1
-    for aggregation in aggregations:
-        with plt.xkcd():
-            plt.figure(figsize=figsize)
-            plt.scatter([[horizon for _ in range(n_runs)] for horizon in horizons],
-                        evaluation.loc[(slice(None), aggregation), :"run"+str(n_runs)].values,
-                        c="blue", label="individual")
-            plt.scatter(horizons, evaluation.loc[(slice(None), aggregation), "average"], c="red",
-                        label="average")
-            plt.legend()
-            plt.title("CRPS for aggregation \"" + aggregation + "\"",
-                      fontdict=fontdict_title)
-            plt.xticks(ticks=horizons, labels=horizons)
-            plt.xlabel("Horizons", fontdict=fontdict_axis)
-            if plots_path is None:
-                plt.show()
-            else:
-                plt.savefig(plots_path + "crps_per_horizon_per_aggregation/" + aggregation + ".png")
-
-
-def plot_crps_per_aggregation(plots_path=None):
-    evaluation = pd.read_csv("../results/bqn/crps_evaluation.csv")
-    evaluation = evaluation.reset_index().pivot(index=["horizon", "aggregation"], columns=[])
-    evaluation = evaluation[evaluation.columns.drop("index")]
-    evaluation = evaluation.reset_index().pivot(index="aggregation", columns=["horizon"])
-    with plt.xkcd():
-        plt.figure(figsize=figsize)
-        plt.boxplot(evaluation.values.transpose())
-        locs, _ = plt.xticks()
-        plt.xticks(ticks=locs, labels=evaluation.index)
-        plt.xlabel("Aggregations", fontdict=fontdict_axis)
-        plt.ylabel("CRPS", fontdict=fontdict_axis)
-        plt.title("Performance per Aggregation", fontdict=fontdict_title)
-        if plots_path is None:
-            plt.show()
-        else:
-            plt.savefig(plots_path + "crps_per_aggregation.png")
-
-
-def plot_crps_per_horizon(plots_path=None):
-    evaluation = pd.read_csv("../results/bqn/crps_evaluation.csv")
-    evaluation = evaluation.reset_index().pivot(index=["horizon", "aggregation"], columns=[])
-    evaluation = evaluation[evaluation.columns.drop("index")]
-    evaluation = evaluation.reset_index().pivot(index="horizon", columns=["aggregation"])
-    with plt.xkcd():
-        plt.figure(figsize=figsize)
-        plt.boxplot(evaluation.values.transpose())
-        locs, _ = plt.xticks()
-        plt.xticks(ticks=locs, labels=evaluation.index)
-        plt.xlabel("Horizons", fontdict=fontdict_axis)
-        plt.ylabel("CRPS", fontdict=fontdict_axis)
-        plt.title("Performance per Horizon", fontdict=fontdict_title)
-        if plots_path is None:
-            plt.show()
-        else:
-            plt.savefig(plots_path + "crps_per_horizon.png")
-
-
 # This does not work since each model needs its own custom loss function which must be registered beforehand
 def load_models() -> dict:
     models = {(horizon, aggregation): keras.models.load_model(
@@ -362,10 +291,11 @@ def analyze_first_coefficient(plots_path=None):
 
 
 if __name__ == "__main__":
+    evaluation_path = "../results/bqn/crps_evaluation.csv"
     plots_path = "../results/bqn/plots/"
     # evaluate_best_hps()
     # plot_rank_histograms_and_forecasts()
-    # plot_crps_per_horizon_per_aggregation(plots_path)
-    # plot_crps_per_horizon(plots_path)
-    # plot_crps_per_aggregation(plots_path)
+    # plot_crps_per_horizon_per_aggregation(evaluation_path, plots_path)
+    # plot_crps_per_horizon(evaluation_path, plots_path)
+    # plot_crps_per_aggregation(evaluation_path, plots_path)
     # analyze_first_coefficient(plots_path)

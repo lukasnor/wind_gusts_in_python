@@ -171,13 +171,14 @@ def preprocess_data(horizon: int,
                       output_variables)
 
 
-# Reformat data depending on level of aggregation in h_pars["aggregation"]
+# Reformat data depending on level of aggregation
+# To understand, what this method does, one should just try it out. Some parts work but ain't pretty
 def format_data(sc_ens_train: DataFrame,
                 sc_ens_test: DataFrame,
                 sc_obs_train: DataFrame,
                 sc_obs_test: DataFrame,
                 aggregation: str) -> (DataFrame, DataFrame, DataFrame, DataFrame):
-    constant_variables = pd.Index(["wind_power", "cos", "sin"])
+    constant_variables = pd.Index(["wind_power", "cos", "sin"])  # These variables need no formatting, since they are constant across the ensemble
     nonconstant_variables = sc_ens_train.columns.drop(constant_variables)
     if aggregation == "mean":
         sc_ens_train_f = sc_ens_train.groupby(level=0).agg(["mean"])
@@ -190,7 +191,7 @@ def format_data(sc_ens_train: DataFrame,
         sc_ens_test_f = sc_ens_test[nonconstant_variables].groupby(level=0).agg(["mean", "std"])
         sc_ens_train_f = pd.concat(
             [sc_ens_train_f, sc_ens_train[constant_variables].groupby(level=0).agg(["mean"])],
-            axis=1)
+            axis=1)  # the groupby and mean operation does nothing except change the format of the index of the DataFrame, a proper multiindex and not an index 1- and 2-tuples
         sc_ens_test_f = pd.concat(
             [sc_ens_test_f, sc_ens_test[constant_variables].groupby(level=0).agg("mean")], axis=1)
         sc_obs_train_f = sc_obs_train
@@ -275,9 +276,11 @@ def categorify_data(sc_ens_train_f: DataFrame,
     cat_ens_test = obs_to_categorical(sc_ens_test_f[["wind_power"]], bin_edges)
     cat_ens_test.iloc[:, -2] = cat_ens_test.iloc[:, -2:].sum(axis=1)
     cat_ens_test = cat_ens_test.iloc[:, :-1]
+
     cat_obs_test = obs_to_categorical(sc_obs_test_f[["wind_power"]], bin_edges)
     cat_obs_test.iloc[:, -2] = cat_obs_test.iloc[:, -2:].sum(axis=1)
     cat_obs_test = cat_obs_test.iloc[:, :-1]
+
     sc_ens_test_fc = pd.concat([sc_ens_test_f, cat_ens_test], axis=1)
     sc_obs_test_fc = pd.concat([sc_obs_test_f, cat_obs_test], axis=1)
 

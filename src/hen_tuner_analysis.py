@@ -5,7 +5,8 @@ from keras.callbacks import EarlyStopping
 from matplotlib import pyplot as plt
 from pandas import DataFrame
 
-from bqn_tuner_analysis import load_hyperparameters_from_folders
+from tuner_helper import load_hyperparameters_from_folders, plot_crps_per_horizon, \
+    plot_crps_per_aggregation, plot_crps_per_horizon_per_aggregation
 from preprocessing import import_data, scale_data, format_data, categorify_data
 from hen import binning_scheme, get_model, build_wrapped_crossentropy_loss, build_wrapped_hen_crps, \
     build_hen_crps, vincentize_forecasts, generate_histogram_plot, evaluation_crps, \
@@ -171,7 +172,7 @@ def evaluate_best_hps():
                                     bin_probs=new_bin_probs_test[::50],
                                     bin_edges=new_bin_edges_test[::50],
                                     name="Test - Horizon " + str(
-                                            horizon) + " - Aggregation " + aggregation,
+                                        horizon) + " - Aggregation " + aggregation,
                                     n=5,
                                     path="../results/hen/plots/forecasts/",
                                     filename="horizon:" + str(
@@ -202,5 +203,14 @@ def evaluate_best_hps():
                                             horizon) + "_agg:" + aggregation + "_test"
                                         )
 
-
     evaluation.to_csv("../results/hen/crps_evaluation.csv")
+
+
+if __name__ == "__main__":
+    # All folders need to exist beforehand, otherwise saving plots won't work
+    evaluation_path = "../results/hen/crps_evaluation.csv"
+    plots_path = "../results/hen/plots/"
+    # evaluate_best_hps()
+    # plot_crps_per_horizon(evaluation_path=evaluation_path, plots_path=plots_path)
+    # plot_crps_per_aggregation(evaluation_path=evaluation_path, plots_path=plots_path)
+    # plot_crps_per_horizon_per_aggregation(evaluation_path=evaluation_path, plots_path=plots_path)

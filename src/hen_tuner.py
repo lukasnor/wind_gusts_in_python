@@ -2,6 +2,7 @@ import json
 from itertools import product
 import keras.optimizer_v2.adam
 import keras_tuner
+import numpy as np
 from keras.callbacks import EarlyStopping
 from keras_tuner import Hyperband
 from pandas import DataFrame
@@ -25,7 +26,7 @@ def run_tuner():
         fixed_params = {"horizon": horizon,
                         "variables": variables,
                         "train_split": 0.85,
-                        "n_bins": 20}  # I don't know how to make the number of bins a hyperparameter, since the data (no. of columns) depends on it
+                        "n_bins": 25}  # I don't know how to make the number of bins a hyperparameter, since the data (no. of columns) depends on it
 
         # Import the data
         ens_train, \
@@ -36,7 +37,8 @@ def run_tuner():
                                train_split=fixed_params["train_split"])
 
         # Get the bin edges
-        bin_edges = binning_scheme(obs_train, fixed_params["n_bins"])
+        # bin_edges = binning_scheme(obs_train, fixed_params["n_bins"])
+        bin_edges = np.linspace(0.0, 1.25 * obs_train.values.max(), fixed_params["n_bins"] + 1)
 
         # Scale the input
         sc_ens_train, \

@@ -52,7 +52,8 @@ def evaluate_best_hps():
                                train_split=fixed_params["train_split"])
 
         # Get the bin edges
-        bin_edges = binning_scheme(obs_train, fixed_params["n_bins"])
+        # bin_edges = binning_scheme(obs_train, fixed_params["n_bins"])
+        bin_edges = np.linspace(0.0, 1.25 * obs_train.values.max(), fixed_params["n_bins"] + 1)
 
         # Scale the input
         sc_ens_train, \

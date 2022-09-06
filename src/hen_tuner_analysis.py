@@ -1,4 +1,6 @@
 from itertools import product
+
+import numpy as np
 import pandas as pd
 import keras
 from keras.callbacks import EarlyStopping
@@ -39,7 +41,7 @@ def evaluate_best_hps():
         fixed_params = {"horizon": horizon,
                         "variables": variables,
                         "train_split": 0.85,
-                        "n_bins": 20}
+                        "n_bins": 25}
 
         # Import the data
         ens_train, \
@@ -104,6 +106,8 @@ def evaluate_best_hps():
             sc_ens_train_fc = sc_ens_train_fc.iloc[:, : (-1) * fixed_params["n_bins"]]
             sc_ens_test_fc = sc_ens_test_fc.iloc[:, : (-1) * fixed_params["n_bins"]]
 
+            evaluations_train = []
+            evaluations_test = []
             bin_probs_list_train = []
             bin_probs_list_test = []
             for i in range(n_runs):
@@ -143,10 +147,16 @@ def evaluate_best_hps():
                 bin_probs_list_test.append(bin_probs_test)
 
                 # Evaluation
-                crps = build_hen_crps(bin_edges)
-                evaluation.loc[index, "run" + str(i + 1)] = \
-                    crps(sc_obs_test_f.values, bin_probs_test.values).numpy()
+                crps_func = build_hen_crps(bin_edges)
+                crps_val_test = crps_func(sc_obs_test_f.values, bin_probs_test.values).numpy()
+                evaluation.loc[index, "run" + str(i + 1)] = crps_val_test
+                evaluations_test.append(crps_val_test)
                 print(evaluation)
+
+                # Save the train evaluation for the weighted vincentization
+                evaluations_train.append(crps_func(sc_obs_train_f.values,
+                                                   bin_probs_train.values).numpy()
+                                         )
 
                 # Make model persistent
                 model.save(
@@ -154,12 +164,19 @@ def evaluate_best_hps():
                         horizon) + "_agg:" + aggregation + "_" + str(i) + ".h5")
 
             # Evaluate the aggregated model
+            weights_train = (1 / np.linspace(1, len(bin_probs_list_train), len(bin_probs_list_train)))[
+                np.array(evaluations_train).argsort()]  # use a 'Benfordian' weight vector
             new_bin_edges_train, new_bin_probs_train = vincentize_forecasts(bin_edges,
                                                                             bin_probs_list_train,
-                                                                            rounding=3)
+                                                                            rounding=3,
+                                                                            weights=weights_train)
+            weights_test = \
+            (1 / np.linspace(1, len(bin_probs_list_test), len(bin_probs_list_test)))[
+                np.array(evaluations_test).argsort()]  # use a 'Benfordian' weight vector
             new_bin_edges_test, new_bin_probs_test = vincentize_forecasts(bin_edges,
                                                                           bin_probs_list_test,
-                                                                          rounding=3)
+                                                                          rounding=3,
+                                                                          weights=weights_test)
 
             evaluation.loc[index, "average"] = evaluation_crps(sc_obs_test_f,
                                                                new_bin_probs_test,

@@ -323,7 +323,7 @@ if __name__ == "__main__":
 
     # Average over models
     models = []
-    for i in range(10):
+    for i in range(3):
         # Build model
         model = get_model(name="Foo" + str(i),
                           input_size=len(sc_ens_train_f.columns),

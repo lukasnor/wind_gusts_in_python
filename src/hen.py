@@ -152,6 +152,7 @@ def quantile_function(alpha: ndarray, bin_edges: ndarray, bin_probs: ndarray):
             alpha - g[i] + eps) / bin_probs[i], bin_edges[-1])
 
 
+# Didn't work, I am too dumb or impatient to implement tensors properly
 # MOOOOORE DIMENSIONSS!!!!
 # l levels, e edges, b bins, n instances, r runs
 # alpha: (l,)
@@ -181,10 +182,11 @@ def test_quantile_function():
     # expectation: [1.0, 1.8., 2.0, 2.5, 3.0, 3.9something, 4.0, 4.0]
 
 
-# Vincentize the forecasted probabilities in bin_probs_list
-def vincentize_forecasts(bin_edges,
+# Vincentize the forecasted probabilities in bin_probs_list, weighted, if desired
+def vincentize_forecasts(bin_edges: np.ndarray,
                          bin_probs_list: [DataFrame],
-                         rounding: int = 3) -> (DataFrame, DataFrame):
+                         rounding: int = 3,
+                         weights: np.ndarray = None) -> (DataFrame, DataFrame):
     levels = pd.concat(map(lambda ps: ps.cumsum(axis=1).round(rounding), bin_probs_list), axis=1)
     levels["zero"] = 0.
     levels["one"] = 1.  # to get the lowest and the highest bin edges!
@@ -193,12 +195,12 @@ def vincentize_forecasts(bin_edges,
         [levels_sorted.iloc[i, :].unique() for i in range(len(levels_sorted))],
         index=levels_sorted.index)
     new_bin_edges = pd.DataFrame(
-        [np.array(
+        [np.average(a=np.array(
             [quantile_function(levels_sorted.iloc[i, :].dropna().values,
                                bin_edges,
                                bin_probs_list[j].iloc[i, :].values)
-             for j in range(len(bin_probs_list))]).mean(axis=0)
-         for i in range(len(levels_sorted))],
+             for j in range(len(bin_probs_list))]), axis=0, weights=weights)
+            for i in range(len(levels_sorted))],
         index=levels_sorted.index)
     new_bin_probs = levels_sorted.diff(axis=1)
     return new_bin_edges, new_bin_probs
@@ -217,6 +219,7 @@ def generate_forecast_plots(obs: pd.DataFrame, bin_probs: pd.DataFrame, bin_edge
                 height=heights.iloc[i, :].dropna(),
                 width=bin_edges.iloc[i, :].diff().dropna(),
                 align="edge")
+        plt.xlim(left=0.0, right=max(bin_edges.max(axis=1).max(), plt.axis()[1]))
         plt.title(name, fontdict=fontdict_title)
         if path is None:
             plt.show()
@@ -226,8 +229,13 @@ def generate_forecast_plots(obs: pd.DataFrame, bin_probs: pd.DataFrame, bin_edge
 
 # Path with a trailing "/"!
 # Plot the histogram forecast as a cdf
-def generate_forecast_plots_2(obs: DataFrame, bin_probs: DataFrame, bin_edges: DataFrame,
-                              quantile_levels: np.ndarray, name: str, n=None, path: str = None,
+def generate_forecast_plots_2(obs: DataFrame,
+                              bin_probs: DataFrame,
+                              bin_edges: DataFrame,
+                              quantile_levels: np.ndarray,
+                              name: str,
+                              n=None,
+                              path: str = None,
                               filename: str = "forecast") -> None:
     q = DataFrame(
         [quantile_function(quantile_levels, bin_edges.iloc[i].dropna().values,
@@ -240,7 +248,7 @@ def generate_forecast_plots_2(obs: DataFrame, bin_probs: DataFrame, bin_edges: D
         plt.plot(q.iloc[(i, slice(None))], quantile_levels, color="blue", label="forecast")
         plt.vlines(obs.iloc[i], ymin=quantile_levels.min(), ymax=quantile_levels.max(),
                    label="observation", color="red", linestyles="dashed")
-        plt.xlim(left=0.0, right=max(1.0, plt.axis()[1]))
+        plt.xlim(left=0.0, right=max(bin_edges.max(axis=1).max(), plt.axis()[1]))
         plt.title(name + " - Forecast " + str(i), fontdict=fontdict_title)
         plt.legend()
         if path is None:
@@ -283,8 +291,8 @@ if __name__ == "__main__":
               "variables": None,
               "train_split": 0.85,
 
-              "aggregation": "all",
-              "n_bins": 20,
+              "aggregation": "mean+std",
+              "n_bins": 25,
               "layer_sizes": [20, 20],
               "activations": ["selu", "selu", "selu"],
 
@@ -314,7 +322,8 @@ if __name__ == "__main__":
                            train_split=h_pars["train_split"])
 
     # Get the bin edges
-    bin_edges = binning_scheme(obs_train, h_pars["n_bins"])
+    # bin_edges = binning_scheme(obs_train, h_pars["n_bins"])
+    bin_edges = np.linspace(0.0, 1.25 * obs_train.values.max(), h_pars["n_bins"] + 1)
 
     # Scale the input
     sc_ens_train, \
@@ -350,13 +359,13 @@ if __name__ == "__main__":
                                      sc_obs_test_f,
                                      bin_edges)
     # Drop the categorical data from the inputs
-    sc_ens_train_fc = sc_ens_train_fc.iloc[:, : (-1) * h_pars["n_bins"]]
-    sc_ens_test_fc = sc_ens_test_fc.iloc[:, : (-1) * h_pars["n_bins"]]
+    # sc_ens_train_fc = sc_ens_train_fc.iloc[:, : (-1) * h_pars["n_bins"]]
+    # sc_ens_test_fc = sc_ens_test_fc.iloc[:, : (-1) * h_pars["n_bins"]]
 
     models = []
     evaluations = []
     bin_probs_list = []
-    for _ in range(3):
+    for _ in range(10):
         # Build model
         model = get_model("First_model",
                           input_size=len(sc_ens_train_fc.columns),
@@ -394,7 +403,12 @@ if __name__ == "__main__":
         bin_probs_list.append(test)
 
     # Evaluate the aggregated model
-    new_bin_edges, new_bin_probs = vincentize_forecasts(bin_edges, bin_probs_list, rounding=3)
+    weights = (1 / np.linspace(1, len(bin_probs_list), len(bin_probs_list)))[
+        np.array(evaluations).argsort()]  # use a 'Benfordian' weight vector
+    new_bin_edges, new_bin_probs = vincentize_forecasts(bin_edges,
+                                                        bin_probs_list,
+                                                        rounding=3,
+                                                        weights=weights)
     print("Individuale evaluations:", evaluations)
     print("Vincentized CRPS:", evaluation_crps(sc_obs_test_f, new_bin_probs, new_bin_edges))
 

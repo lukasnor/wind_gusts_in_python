@@ -411,6 +411,7 @@ if __name__ == "__main__":
     h_pars = {"horizon": 3,  #
               "variables": None,
               "train_split": 0.85,
+              "data_set": "sweden",
 
               "aggregation": "mean+std",
               "layer_sizes": [20, 15],
@@ -425,21 +426,29 @@ if __name__ == "__main__":
         h_pars["activations"] = ["selu" for i in range(len(h_pars["layer_sizes"]))]
     # Default value for variables is 'using all variables'
     if h_pars["variables"] is None:
-        h_pars["variables"] = ["u100", "v100", "t2m", "sp", "speed"]
+        if h_pars["data_set"] == "sweden":
+            h_pars["variables"] = ["u100", "v100", "t2m", "sp", "speed", "wind_power"]
+        else:
+            h_pars["variables"] = ["sp", "t2m", "u100", "v100", "wind_power", "capacity"]
 
     # Import the data
     sc_ens_train, sc_ens_test, sc_obs_train, sc_obs_test, input_scalers, output_scalers \
-        = preprocess_data(h_pars["horizon"], h_pars["variables"], h_pars["train_split"])
+        = preprocess_data(h_pars["horizon"], h_pars["variables"], h_pars["train_split"],
+                          data_set=h_pars["data_set"])
     obs_scaler = output_scalers["wind_power"]
     obs_max = obs_scaler.data_max_
     obs_min = obs_scaler.data_min_
 
     # Format the data
-    sc_ens_train_f, sc_ens_test_f, sc_obs_train_f, sc_obs_test_f = format_data(sc_ens_train,
-                                                                               sc_ens_test,
-                                                                               sc_obs_train,
-                                                                               sc_obs_test,
-                                                                               h_pars["aggregation"])
+    sc_ens_train_f, \
+    sc_ens_test_f, \
+    sc_obs_train_f, \
+    sc_obs_test_f = format_data(sc_ens_train,
+                                sc_ens_test,
+                                sc_obs_train,
+                                sc_obs_test, h_pars[
+                                    "aggregation"],
+                                h_pars["data_set"])
     # Build model
     base_model = get_base_logistic_model(name="base_model",
                                          input_size=len(sc_ens_train_f.columns),

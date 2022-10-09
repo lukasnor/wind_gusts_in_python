@@ -62,6 +62,7 @@ def get_model(name: str, input_size: int, layer_sizes: [int], activations: [str]
 
 
 # For a list of models of same type, construct the average model
+# Vincentization for BQN
 def average_models(models: [Model], name) -> Model:
     common_input = layers.Input(name="common_input", shape=models[0].input.shape[1])
     average_output = layers.Average(name="average")([model(common_input) for model in models])
@@ -241,6 +242,7 @@ def generate_histogram_plot(obs: pd.DataFrame, f: pd.DataFrame, name: str, bins:
 
 
 # Path with a trailing "/"!
+# Old version of generate_histogram_plot
 def generate_pit_plot(obs: pd.DataFrame, quantiles: pd.DataFrame, name: str, n_bins: int = 10,
                       path: str = None, filename: str = "rankhistogram") -> None:
     ranks = get_rank(obs, quantiles)
@@ -285,7 +287,7 @@ if __name__ == "__main__":
 
               "aggregation": "mean+std",
               "degree": 10,
-              "layer_sizes": [20, 15, 10],
+              "layer_sizes": [20, 15],
               "activations": ["selu", "selu", "selu"],
 
               "batch_size": 25,
@@ -297,15 +299,23 @@ if __name__ == "__main__":
         h_pars["activations"] = ["selu" for i in range(len(h_pars["layer_sizes"]))]
     # Default value for variables is 'using all variables'
     if h_pars["variables"] is None:
-        h_pars["variables"] = ["u100", "v100", "t2m", "sp", "speed", "wind_power"]
+        if h_pars["data_set"] == "sweden":
+            h_pars["variables"] = ["u100", "v100", "t2m", "sp", "speed", "wind_power"]
+        elif h_pars["data_set"] == "gg":
+            h_pars["variables"] = ["sp", "t2m", "u100", "v100", "wind_power", "capacity"]
 
     # Import the data
-    sc_ens_train, sc_ens_test, sc_obs_train, sc_obs_test, input_scalers, output_scalers \
-        = preprocess_data(horizon=h_pars["horizon"],
-                          train_variables=h_pars["variables"],
-                          train_split=h_pars["train_split"],
-                          input_variables=h_pars["variables"],
-                          output_variables=None)
+    sc_ens_train,\
+    sc_ens_test,\
+    sc_obs_train,\
+    sc_obs_test,\
+    input_scalers,\
+    output_scalers \
+        = preprocess_data(horizon=h_pars["horizon"], train_variables=h_pars["variables"],
+                          train_split=h_pars["train_split"], data_set=h_pars["data_set"],
+                          input_variables_to_scale=h_pars["variables"],
+                          output_variables_to_scale=None)
+
     obs_scaler = output_scalers["wind_power"]
     obs_max = obs_scaler.data_max_
     obs_min = obs_scaler.data_min_
@@ -315,11 +325,8 @@ if __name__ == "__main__":
     sc_ens_train_f, \
     sc_ens_test_f, \
     sc_obs_train_f, \
-    sc_obs_test_f = format_data(sc_ens_train,
-                                sc_ens_test,
-                                sc_obs_train,
-                                sc_obs_test,
-                                h_pars["aggregation"])
+    sc_obs_test_f = format_data(sc_ens_train, sc_ens_test, sc_obs_train, sc_obs_test,
+                                h_pars["aggregation"], h_pars["data_set"])
 
     # Average over models
     models = []
@@ -380,7 +387,7 @@ if __name__ == "__main__":
     if len(models) == 1:
         models += [models[0]]
 
-    # Averaging the models
+    # Averaging the models, i.e. Vincentization
     for model in models:
         model.trainable = False
     average_model = average_models(models, name="average_model")

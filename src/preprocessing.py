@@ -19,7 +19,8 @@ def scale(data: DataFrame, scaler_dict) -> DataFrame:
     scaled_data = []
     for column in data.columns:
         if column in scaler_dict:
-            scaled_np_column = scaler_dict[column].transform(data[column].values.reshape(-1, 1))  # the reshape is needed, otherwise scikit complains
+            scaled_np_column = scaler_dict[column].transform(data[column].values.reshape(-1,
+                                                                                         1))  # the reshape is needed, otherwise scikit complains
             scaled_data.append(DataFrame(scaled_np_column, index=data.index, columns=[column]))
         else:
             scaled_data.append(data[column])
@@ -58,8 +59,63 @@ def obs_to_categorical(obs: DataFrame, bin_edges: ndarray) -> DataFrame:
 
 
 # Manuell nen Validation set auswählen?
-def import_data(horizon: int, variables: [str], train_split: float) -> (
+def import_data(horizon: int, variables: [str], train_split: float, data_set: str) -> (
         DataFrame, DataFrame, DataFrame, DataFrame):
+    if data_set == "sweden":
+        observations, ensembles = load_swedish_data(horizon, variables)
+    elif data_set == "gg":
+        observations, ensembles = load_gg_data(horizon, variables)
+    else:
+        raise Exception("Incorrect data set name:", data_set)
+
+    # TODO: Restricting to not NaN dates could be added here
+    # Split train and test set according to h_pars["train_split"]
+    possible_dates = observations.index.map(lambda d: d.ceil(freq="D")).intersection(
+        observations.index.map(lambda d: d.floor(freq="D")))
+    # round to even hour or stay if horizon =24
+    dates = possible_dates.intersection(ensembles.index.get_level_values(0).unique().map(
+        lambda d: d - pd.Timedelta(hours=horizon))).map(
+        lambda d: d + pd.Timedelta(hours=horizon))[:-1]
+    n_obs = len(dates)
+    n_train = int(len(dates) * train_split)
+    # randomize the train and test set
+    i_train = np.sort(np.random.choice(n_obs, size=n_train,
+                                       replace=False))
+    i_test = np.delete(np.array(range(n_obs)), i_train)
+    # i_train = np.arange(0, n_train)  # split linearly
+    # i_test = np.arange(n_train, n_obs)
+    dates_train = dates[i_train]
+    dates_test = dates[i_test]
+
+    # Select dates and add the lagged wind power data to the weather ensembles
+    ens_train = ensembles.loc[(dates_train, slice(None))]
+    additional_train_data = observations.loc[ens_train.index.get_level_values(0).map(
+        lambda d: d - pd.Timedelta(hours=horizon))].set_index(ens_train.index).astype("float64")
+    ens_train = pd.concat([ens_train, additional_train_data], axis=1)
+    ens_test = ensembles.loc[(dates_test, slice(None))]
+    additional_test_data = observations.loc[ens_test.index.get_level_values(0).map(
+        lambda d: d - pd.Timedelta(hours=horizon))].set_index(ens_test.index).astype("float64")
+    ens_test = pd.concat([ens_test, additional_test_data], axis=1)
+
+    # Add dayofyear as sin and cos encoding
+    ens_train["cos"] = ens_train.index.get_level_values(0).map(
+        lambda timestamp: np.cos(2 * np.pi * (timestamp.dayofyear - 1) / 365))
+    ens_train["sin"] = ens_train.index.get_level_values(0).map(
+        lambda timestamp: np.sin(2 * np.pi * (timestamp.dayofyear - 1) / 365))
+    ens_test["cos"] = ens_test.index.get_level_values(0).map(
+        lambda timestamp: np.cos(2 * np.pi * (timestamp.dayofyear - 1) / 365))
+    ens_test["sin"] = ens_test.index.get_level_values(0).map(
+        lambda timestamp: np.sin(2 * np.pi * (timestamp.dayofyear - 1) / 365))
+
+    # Drop the capacity column, if data set is "gg"
+    obs_train = observations[["wind_power"]].loc[dates_train].astype("float64")
+    obs_test = observations[["wind_power"]].loc[dates_test].astype("float64")
+
+    return ens_train, ens_test, obs_train, obs_test
+
+
+# Subroutine to load the swedish data set
+def load_swedish_data(horizon: int, variables: [str]):
     # Import observation data
     observations = pd.read_csv("../data/Sweden_Zone3_Power.csv", index_col=0)
     observations.index = pd.to_datetime(observations.index, infer_datetime_format=True)
@@ -72,49 +128,41 @@ def import_data(horizon: int, variables: [str], train_split: float) -> (
     ensembles = ensembles[list(set(variables) & set(ensembles.columns))]
     # Select only relevant horizon
     ensembles = ensembles.sort_index(level=[0, 1, 2])
-    ensembles = ensembles.loc[(horizon, slice(None), slice(None))]
-    #ensembles.index = ensembles.index.droplevel(0)
+    ensembles = ensembles.loc[horizon]
 
-    # Split train and test set according to h_pars["train_split"]
-    possible_dates = observations.index.map(lambda d: d.ceil(freq="D")).intersection(
-        observations.index.map(lambda d: d.floor(freq="D")))
-    # round do even hour or stay if horizon =24
-    dates = possible_dates.intersection(ensembles.index.get_level_values(0).unique().map(
-        lambda d: d - pd.Timedelta(hours=horizon))).map(
-        lambda d: d + pd.Timedelta(hours=horizon))
-    n_obs = len(dates)
-    n_train = int(len(dates) * train_split)
-    # randomize the train and test set
-    i_train = np.sort(np.random.choice(n_obs, size=n_train,
-                                       replace=False))
-    i_test = np.delete(np.array(range(n_obs)), i_train)
-    # i_train = np.arange(0, n_train)  # split linearly
-    # i_test = np.arange(n_train, n_obs)
-    dates_train = dates[i_train]
-    dates_test = dates[i_test]
+    return observations, ensembles
 
-    # Select dates and add the wind power data to the weather ensembles
-    ens_train = ensembles.loc[(dates_train, slice(None))]
-    ens_train["wind_power"] = observations.loc[ens_train.index.get_level_values(0).map(
-        lambda d: d - pd.Timedelta(hours=horizon))].set_index(ens_train.index).astype("float64")
-    ens_test = ensembles.loc[(dates_test, slice(None))]
-    ens_test["wind_power"] = observations.loc[ens_test.index.get_level_values(0).map(
-        lambda d: d - pd.Timedelta(hours=horizon))].set_index(ens_test.index).astype("float64")
 
-    # Add dayofyear as sin and cos encoding
-    ens_train["cos"] = ens_train.index.get_level_values(0).map(
-        lambda timestamp: np.cos(2 * np.pi * (timestamp.dayofyear - 1) / 365))
-    ens_train["sin"] = ens_train.index.get_level_values(0).map(
-        lambda timestamp: np.sin(2 * np.pi * (timestamp.dayofyear - 1) / 365))
-    ens_test["cos"] = ens_test.index.get_level_values(0).map(
-        lambda timestamp: np.cos(2 * np.pi * (timestamp.dayofyear - 1) / 365))
-    ens_test["sin"] = ens_test.index.get_level_values(0).map(
-        lambda timestamp: np.sin(2 * np.pi * (timestamp.dayofyear - 1) / 365))
+# Subroutine to load the GG data set
+def load_gg_data(horizon: int, variables: [str]):
+    # Import wind power generation and capacity
+    observations = pd.read_csv("../data/GG_Wind_Installed-Capacity_U_V_Speed.csv", index_col=0)
+    observations.index = pd.to_datetime(observations.index, infer_datetime_format=True)
+    observations = observations[
+        observations.columns.drop(["u100", "v100", "speed"])]  # unused variables
 
-    obs_train = observations.loc[dates_train].astype("float64")
-    obs_test = observations.loc[dates_test].astype("float64")
+    # Import ensemble data
+    ensembles = pd.read_csv("../data/GG_All_Ensmbles_2015-2021.csv")
+    ensembles["time"] = pd.to_datetime(ensembles["time"], infer_datetime_format=True)
+    ensembles = ensembles[
+        ensembles.columns.drop(["longitude", "latitude", "sr"])]  # drop (quasi-)constant columns
 
-    return ens_train, ens_test, obs_train, obs_test
+    # Add horizon to distinguish the times
+    horizons = ensembles["time"].map(lambda dt: dt.hour)
+    horizons.iloc[np.arange(8, len(ensembles), 9)] = 24
+    ensembles["horizon"] = horizons
+    # Create multiindex
+    ensembles = ensembles.pivot(index=["horizon", "time", "number"], columns=[])
+    ensembles = ensembles[
+        list(set(variables) & set(ensembles.columns))]  # and restrict to variables
+    # Select the relevant horizon
+    ensembles = ensembles.sort_index(level=[0, 1, 2])
+    ensembles = ensembles.loc[horizon]
+
+    # TODO: NaN handling (linear interpolation) goes here
+    observations = observations.interpolate()
+
+    return observations, ensembles
 
 
 # scales input and output data according to input_variables and output_variables
@@ -122,23 +170,29 @@ def import_data(horizon: int, variables: [str], train_split: float) -> (
 # output_variable \subseteq obs_*.columns
 # None variables means scaling all of them
 # Empty lists mean scaling none of them
-# TODO: Probeweise mal die Skalierung der Beobachtung rausnehmen
-def scale_data(ens_train: DataFrame,
-               ens_test: DataFrame,
-               obs_train: DataFrame,
-               obs_test: DataFrame,
-               input_variables: [str] = None,
+def scale_data(ens_train: DataFrame, ens_test: DataFrame, obs_train: DataFrame, obs_test: DataFrame,
+               data_set: str, input_variables: [str] = None,
                output_variables: [str] = None) -> (
         DataFrame, DataFrame, DataFrame, DataFrame, dict, dict):
     # Define scaler types for each input variable
-    input_scalers = {"u100": StandardScaler(),
-                     "v100": StandardScaler(),
-                     "t2m": StandardScaler(),
-                     "sp": StandardScaler(),
-                     "speed": MinMaxScaler(),
-                     "wind_power": MinMaxScaler()}  # MinMaxScaler more suitable for power data.
-    # But even better when not aggregated
-
+    input_scalers = {}
+    if data_set == "sweden":
+        input_scalers = {"u100": StandardScaler(),
+                         "v100": StandardScaler(),
+                         "t2m": StandardScaler(),
+                         "sp": StandardScaler(),
+                         "speed": MinMaxScaler(),
+                         "wind_power": MinMaxScaler()}  # MinMaxScaler more suitable for power data.
+        # But even better when not aggregate
+    elif data_set == "gg":
+        input_scalers = {"sp": StandardScaler(),
+                         "t2m": StandardScaler(),
+                         "u100": StandardScaler(),
+                         "v100": StandardScaler(),
+                         "wind_power": MinMaxScaler(),
+                         "capacity": MinMaxScaler()}  # Another potential variable could rel. wind_power (w_p/cap.)
+    else:
+        raise Exception("Incorrect data set name:", data_set)
     # Remove unnecessary scalers from the dict when variables are missing, not scaling them
     if input_variables is not None:
         input_scalers = {variable: input_scalers[variable] for variable in input_variables}
@@ -149,7 +203,11 @@ def scale_data(ens_train: DataFrame,
     sc_ens_test = scale(ens_test, input_scalers)
 
     # Same for the observations
-    output_scalers = {"wind_power": MinMaxScaler()}
+    output_scalers = {}
+    if data_set == "sweden":
+        output_scalers = {"wind_power": MinMaxScaler()}
+    if data_set == "gg":
+        output_scalers = {"wind_power": MinMaxScaler()} # TODO:, "capacity": MinMaxScaler()}
     if output_variables is not None:
         output_scalers = {variable: output_scalers[variable] for variable in output_variables}
     fit_scalers(obs_train, output_scalers)
@@ -161,24 +219,26 @@ def scale_data(ens_train: DataFrame,
 
 
 # First import, then scale
-def preprocess_data(horizon: int,
-                    train_variables: [str],
-                    train_split: float,
-                    input_variables: [str] = None,
-                    output_variables: [str] = None) -> (
+def preprocess_data(horizon: int, train_variables: [str], train_split: float, data_set: str,
+                    input_variables_to_scale: [str] = None,
+                    output_variables_to_scale: [str] = None) -> (
         DataFrame, DataFrame, DataFrame, DataFrame, dict, dict):
-    return scale_data(*import_data(horizon, train_variables, train_split), input_variables,
-                      output_variables)
+    return scale_data(*import_data(horizon, train_variables, train_split, data_set), data_set,
+                      input_variables_to_scale, output_variables_to_scale)
 
 
 # Reformat data depending on level of aggregation
 # To understand, what this method does, one should just try it out. Some parts work but ain't pretty
-def format_data(sc_ens_train: DataFrame,
-                sc_ens_test: DataFrame,
-                sc_obs_train: DataFrame,
-                sc_obs_test: DataFrame,
-                aggregation: str) -> (DataFrame, DataFrame, DataFrame, DataFrame):
-    constant_variables = pd.Index(["wind_power", "cos", "sin"])  # These variables need no formatting, since they are constant across the ensemble
+def format_data(sc_ens_train: DataFrame, sc_ens_test: DataFrame, sc_obs_train: DataFrame,
+                sc_obs_test: DataFrame, aggregation: str, data_set) -> (
+DataFrame, DataFrame, DataFrame, DataFrame):
+    if data_set == "sweden":
+        constant_variables = pd.Index(["wind_power", "cos",
+                                       "sin"])  # These variables need no formatting, since they are constant across the ensemble
+    elif data_set == "gg":
+        constant_variables = pd.Index(["wind_power", "capacity", "cos", "sin"])
+    else:
+        raise Exception("Incorrect data set name:", data_set)
     nonconstant_variables = sc_ens_train.columns.drop(constant_variables)
     if aggregation == "mean":
         sc_ens_train_f = sc_ens_train.groupby(level=0).agg(["mean"])
@@ -291,25 +351,21 @@ if __name__ == "__main__":
     h_pars = {"horizon": 3,
               "variables": ["t2m", "sp", "wind_power"],
               "train_split": 0.85,
+              "data_set": "gg",
 
               "aggregation": "all"}
-    ens_train, ens_test, obs_train, obs_test = import_data(h_pars["horizon"],
-                                                           h_pars["variables"],
-                                                           h_pars["train_split"])
+    ens_train, ens_test, obs_train, obs_test = import_data(h_pars["horizon"], h_pars["variables"],
+                                                           h_pars["train_split"],
+                                                           data_set=h_pars["data_set"])
     sc_ens_train, \
     sc_ens_test, \
     sc_obs_train, \
     sc_obs_test, \
     input_scalers, \
-    output_scalers = scale_data(ens_train,
-                                ens_test,
-                                obs_train,
-                                obs_test,
-                                h_pars["variables"])
+    output_scalers = scale_data(ens_train, ens_test, obs_train, obs_test,
+                                data_set=h_pars["data_set"], input_variables=h_pars["variables"])
     sc_ens_train_f, \
     sc_ens_test_f, \
     sc_obs_train_f, \
-    sc_obs_test_f = format_data(sc_ens_train,
-                                sc_ens_test,
-                                sc_obs_train,
-                                sc_obs_test, h_pars["aggregation"])
+    sc_obs_test_f = format_data(sc_ens_train, sc_ens_test, sc_obs_train, sc_obs_test,
+                                h_pars["aggregation"], h_pars["data_set"])

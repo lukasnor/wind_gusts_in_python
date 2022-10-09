@@ -54,7 +54,7 @@ def evaluate_best_hps():
     evaluation = pd.DataFrame(index=hps.index,
                               columns=["run" + str(i + 1) for i in range(n_runs)] + ["average"])
 
-    fixed_params = {"variables": variables, "train_split": 0.85, "patience": 27}
+    fixed_params = {"variables": variables, "train_split": 0.85, "data_set": "sweden", "patience": 27}
     # horizons = [12]
     # aggregations = ["single"]
     # evaluation = pd.read_csv("../results/bqn/crps_evaluation.csv").pivot(
@@ -63,7 +63,8 @@ def evaluate_best_hps():
         fixed_params["horizon"] = horizon
         # Import data
         sc_ens_train, sc_ens_test, sc_obs_train, sc_obs_test, input_scalers, output_scalers \
-            = preprocess_data(horizon, variables, train_split=fixed_params["train_split"])
+            = preprocess_data(horizon, variables, train_split=fixed_params["train_split"],
+                              data_set=fixed_params["data_set"])
         obs_scaler = output_scalers["wind_power"]
         obs_max = obs_scaler.data_max_[0]
         obs_min = obs_scaler.data_min_[0]
@@ -87,11 +88,8 @@ def evaluate_best_hps():
             (sc_ens_train_f,
              sc_ens_test_f,
              sc_obs_train_f,
-             sc_obs_test_f) = format_data(sc_ens_train,
-                                          sc_ens_test,
-                                          sc_obs_train,
-                                          sc_obs_test,
-                                          aggregation)
+             sc_obs_test_f) = format_data(sc_ens_train, sc_ens_test, sc_obs_train, sc_obs_test,
+                                          aggregation, fixed_params["data_set"])
             models = []
             for i in range(n_runs):
                 model = get_model(name="run" + str(i + 1),
@@ -193,14 +191,14 @@ def load_model(horizon, aggregation, crps) -> keras.Model:
 
 def plot_rank_histograms_and_forecasts(plots_path=None):
     hps = load_hyperparameters_from_folders("../results/bqn/hps/")
-    fixed_params = {"variables": variables, "train_split": 0.85}
+    fixed_params = {"variables": variables, "train_split": 0.85, "data_set": "sweden"}
     for horizon in horizons:
         fixed_params["horizon"] = horizon
         # Import data
         sc_ens_train, sc_ens_test, sc_obs_train, sc_obs_test, input_scalers, output_scalers \
-            = preprocess_data(horizon=horizon,
-                              train_variables=fixed_params["variables"],
-                              train_split=fixed_params["train_split"])
+            = preprocess_data(horizon=horizon, train_variables=fixed_params["variables"],
+                              train_split=fixed_params["train_split"],
+                              data_set=fixed_params["data_set"])
         obs_scaler = output_scalers["wind_power"]
         obs_max = obs_scaler.data_max_
         obs_min = obs_scaler.data_min_
@@ -215,11 +213,8 @@ def plot_rank_histograms_and_forecasts(plots_path=None):
             (sc_ens_train_f,
              sc_ens_test_f,
              sc_obs_train_f,
-             sc_obs_test_f) = format_data(sc_ens_train,
-                                          sc_ens_test,
-                                          sc_obs_train,
-                                          sc_obs_test,
-                                          fixed_params["aggregation"])
+             sc_obs_test_f) = format_data(sc_ens_train, sc_ens_test, sc_obs_train, sc_obs_test,
+                                          fixed_params["aggregation"], fixed_params["data_set"])
             train = pd.DataFrame(model.predict(sc_ens_train_f), index=sc_ens_train_f.index)
             test = pd.DataFrame(model.predict(sc_ens_test_f), index=sc_obs_test_f.index)
             with plt.xkcd():
@@ -249,15 +244,15 @@ def plot_rank_histograms_and_forecasts(plots_path=None):
 
 def analyze_first_coefficient(plots_path=None):
     hps = load_hyperparameters_from_folders("../results/bqn/hps/")
-    fixed_params = {"variables": variables, "train_split": 0.85}
+    fixed_params = {"variables": variables, "train_split": 0.85, "data_set": "sweden"}
     coeffs = pd.DataFrame(index=horizons, columns=aggregations)
     for horizon in horizons:
         fixed_params["horizon"] = horizon
         # Import data
         sc_ens_train, sc_ens_test, sc_obs_train, sc_obs_test, input_scalers, output_scalers \
-            = preprocess_data(horizon=horizon,
-                              train_variables=fixed_params["variables"],
-                              train_split=fixed_params["train_split"])
+            = preprocess_data(horizon=horizon, train_variables=fixed_params["variables"],
+                              train_split=fixed_params["train_split"],
+                              data_set=fixed_params["data_set"])
         obs_scaler = output_scalers["wind_power"]
         obs_max = obs_scaler.data_max_
         obs_min = obs_scaler.data_min_
@@ -272,11 +267,8 @@ def analyze_first_coefficient(plots_path=None):
             (sc_ens_train_f,
              sc_ens_test_f,
              sc_obs_train_f,
-             sc_obs_test_f) = format_data(sc_ens_train,
-                                          sc_ens_test,
-                                          sc_obs_train,
-                                          sc_obs_test,
-                                          fixed_params["aggregation"])
+             sc_obs_test_f) = format_data(sc_ens_train, sc_ens_test, sc_obs_train, sc_obs_test,
+                                          fixed_params["aggregation"], fixed_params["data_set"])
             test = pd.DataFrame(model.predict(sc_ens_test_f), index=sc_obs_test_f.index)
             coeffs.loc[index] = test[0].mean()
     with plt.xkcd():

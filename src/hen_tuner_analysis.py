@@ -41,15 +41,15 @@ def evaluate_best_hps():
         fixed_params = {"horizon": horizon,
                         "variables": variables,
                         "train_split": 0.85,
+                        "data_set": "sweden",
                         "n_bins": 25}
 
         # Import the data
         ens_train, \
         ens_test, \
         obs_train, \
-        obs_test = import_data(horizon=fixed_params["horizon"],
-                               variables=fixed_params["variables"],
-                               train_split=fixed_params["train_split"])
+        obs_test = import_data(horizon=fixed_params["horizon"], variables=fixed_params["variables"],
+                               train_split=fixed_params["train_split"], data_set=fixed_params["data_set"])
 
         # Get the bin edges
         # bin_edges = binning_scheme(obs_train, fixed_params["n_bins"])
@@ -61,11 +61,8 @@ def evaluate_best_hps():
         sc_obs_train, \
         sc_obs_test, \
         input_scalers, \
-        output_scalers = scale_data(ens_train,
-                                    ens_test,
-                                    obs_train,
-                                    obs_test,
-                                    # do not scale "wind_power"
+        output_scalers = scale_data(ens_train, ens_test, obs_train, obs_test,
+                                    data_set=fixed_params["data_set"],
                                     input_variables=["u100", "v100", "t2m", "sp", "speed"],
                                     output_variables=[])  # do not scale output variables
 
@@ -88,11 +85,9 @@ def evaluate_best_hps():
             sc_ens_train_f, \
             sc_ens_test_f, \
             sc_obs_train_f, \
-            sc_obs_test_f = format_data(sc_ens_train,
-                                        sc_ens_test,
-                                        sc_obs_train,
-                                        sc_obs_test,
-                                        aggregation=fixed_params["aggregation"])
+            sc_obs_test_f = format_data(sc_ens_train, sc_ens_test, sc_obs_train, sc_obs_test,
+                                        aggregation=fixed_params["aggregation"],
+                                        data_set=fixed_params["data_set"])
 
             # Categorify wind_power data
             sc_ens_train_fc, \
@@ -231,4 +226,4 @@ if __name__ == "__main__":
     # evaluate_best_hps()
     # plot_crps_per_horizon(evaluation_path=evaluation_path, plots_path=plots_path)
     # plot_crps_per_aggregation(evaluation_path=evaluation_path, plots_path=plots_path)
-    # plot_crps_per_horizon_per_aggregation(evaluation_path=evaluation_path, plots_path=plots_path)
+    plot_crps_per_horizon_per_aggregation(evaluation_path=evaluation_path, plots_path=plots_path)

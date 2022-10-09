@@ -26,15 +26,15 @@ def run_tuner():
         fixed_params = {"horizon": horizon,
                         "variables": variables,
                         "train_split": 0.85,
+                        "data_set": "sweden",
                         "n_bins": 25}  # I don't know how to make the number of bins a hyperparameter, since the data (no. of columns) depends on it
 
         # Import the data
         ens_train, \
         ens_test, \
         obs_train, \
-        obs_test = import_data(horizon=fixed_params["horizon"],
-                               variables=fixed_params["variables"],
-                               train_split=fixed_params["train_split"])
+        obs_test = import_data(horizon=fixed_params["horizon"], variables=fixed_params["variables"],
+                               train_split=fixed_params["train_split"], data_set=fixed_params["data_set"])
 
         # Get the bin edges
         # bin_edges = binning_scheme(obs_train, fixed_params["n_bins"])
@@ -46,11 +46,8 @@ def run_tuner():
         sc_obs_train, \
         sc_obs_test, \
         input_scalers, \
-        output_scalers = scale_data(ens_train,
-                                    ens_test,
-                                    obs_train,
-                                    obs_test,
-                                    # do not scale "wind_power"
+        output_scalers = scale_data(ens_train, ens_test, obs_train, obs_test,
+                                    data_set=fixed_params["data_set"],
                                     input_variables=["u100", "v100", "t2m", "sp", "speed"],
                                     output_variables=[])  # do not scale output variables
 
@@ -61,11 +58,9 @@ def run_tuner():
             sc_ens_train_f, \
             sc_ens_test_f, \
             sc_obs_train_f, \
-            sc_obs_test_f = format_data(sc_ens_train,
-                                        sc_ens_test,
-                                        sc_obs_train,
-                                        sc_obs_test,
-                                        aggregation=fixed_params["aggregation"])
+            sc_obs_test_f = format_data(sc_ens_train, sc_ens_test, sc_obs_train, sc_obs_test,
+                                        aggregation=fixed_params["aggregation"],
+                                        data_set=fixed_params["data_set"])
 
             # Categorify wind_power data
             sc_ens_train_fc, \

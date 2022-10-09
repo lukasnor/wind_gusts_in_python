@@ -290,9 +290,10 @@ if __name__ == "__main__":
     h_pars = {"horizon": 3,  #
               "variables": None,
               "train_split": 0.85,
+              "data_set": "sweden",
 
-              "aggregation": "mean+std",
-              "n_bins": 25,
+              "aggregation": "single+std",
+              "n_bins": 30,
               "layer_sizes": [20, 20],
               "activations": ["selu", "selu", "selu"],
 
@@ -305,7 +306,10 @@ if __name__ == "__main__":
         h_pars["activations"] = ["selu" for i in range(len(h_pars["layer_sizes"]))]
     # Default value for variables is 'using all variables'
     if h_pars["variables"] is None:
-        h_pars["variables"] = ["u100", "v100", "t2m", "sp", "speed", "wind_power"]
+        if h_pars["data_set"] == "sweden":
+            h_pars["variables"] = ["u100", "v100", "t2m", "sp", "speed", "wind_power"]
+        else:
+            h_pars["variables"] = ["sp", "t2m", "u100", "v100", "wind_power", "capacity"]
     # Default values for batch_size for aggregations "mean", "mean+std", "all" are 25 and
     # 500 for "single" and "single+std"
     if h_pars["aggregation"] in ["single", "single+std"]:
@@ -317,9 +321,8 @@ if __name__ == "__main__":
     ens_train, \
     ens_test, \
     obs_train, \
-    obs_test = import_data(horizon=h_pars["horizon"],
-                           variables=h_pars["variables"],
-                           train_split=h_pars["train_split"])
+    obs_test = import_data(horizon=h_pars["horizon"], variables=h_pars["variables"],
+                           train_split=h_pars["train_split"], data_set=h_pars["data_set"])
 
     # Get the bin edges
     # bin_edges = binning_scheme(obs_train, h_pars["n_bins"])
@@ -331,11 +334,8 @@ if __name__ == "__main__":
     sc_obs_train, \
     sc_obs_test, \
     input_scalers, \
-    output_scalers = scale_data(ens_train,
-                                ens_test,
-                                obs_train,
-                                obs_test,
-                                # do not scale "wind_power"
+    output_scalers = scale_data(ens_train, ens_test, obs_train, obs_test,
+                                data_set=h_pars["data_set"],
                                 input_variables=["u100", "v100", "t2m", "sp", "speed"],
                                 output_variables=[])  # do not scale output variables
 
@@ -343,11 +343,8 @@ if __name__ == "__main__":
     sc_ens_train_f, \
     sc_ens_test_f, \
     sc_obs_train_f, \
-    sc_obs_test_f = format_data(sc_ens_train,
-                                sc_ens_test,
-                                sc_obs_train,
-                                sc_obs_test,
-                                aggregation=h_pars["aggregation"])
+    sc_obs_test_f = format_data(sc_ens_train, sc_ens_test, sc_obs_train, sc_obs_test,
+                                aggregation=h_pars["aggregation"], data_set=h_pars["data_set"])
 
     # Categorify wind_power data
     sc_ens_train_fc, \
@@ -365,9 +362,9 @@ if __name__ == "__main__":
     models = []
     evaluations = []
     bin_probs_list = []
-    for _ in range(10):
+    for i in range(3):
         # Build model
-        model = get_model("First_model",
+        model = get_model("model_"+str(i),
                           input_size=len(sc_ens_train_fc.columns),
                           layer_sizes=h_pars["layer_sizes"],
                           activations=h_pars["activations"],

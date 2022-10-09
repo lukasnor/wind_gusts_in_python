@@ -23,7 +23,7 @@ horizons = [3, 6, 9, 12, 15, 18, 21, 24]
 variables = ["u100", "v100", "t2m", "sp", "speed", "wind_power"]
 variable_selections = [variables]  # or =  list(powerset(variables))[1:]
 aggregations = ["single", "single+std", "mean+std", "mean", "all"]
-#aggregations = ["mean"]
+# aggregations = ["mean"]
 fixed_params_selections = [{"horizon": a, "variables": b, "aggregation": c} for a, b, c in
                            product(horizons, variable_selections, aggregations)]
 
@@ -33,14 +33,16 @@ def run_tuner():
     # aggregations = ["single+std"]
     # horizons = [6]
     for horizon in horizons:
-        fixed_params = {"horizon": horizon, "variables": variables, "train_split": 0.85}
+        fixed_params = {"horizon": horizon, "variables": variables, "train_split": 0.85,
+                        "data_set": "sweden"}
         # Import data
-        sc_ens_train,\
-        sc_ens_test,\
-        sc_obs_train,\
-        sc_obs_test,\
-        input_scalers,\
-        output_scalers= preprocess_data(horizon=horizon, train_variables=variables, train_split=0.85)
+        sc_ens_train, \
+        sc_ens_test, \
+        sc_obs_train, \
+        sc_obs_test, \
+        input_scalers, \
+        output_scalers = preprocess_data(horizon=horizon, train_variables=variables,
+                                         train_split=0.85, data_set=fixed_params["data_set"])
         obs_scaler = output_scalers["wind_power"]
         obs_max = obs_scaler.data_max_
         obs_min = obs_scaler.data_min_
@@ -48,11 +50,15 @@ def run_tuner():
         for aggregation in aggregations:
             fixed_params["aggregation"] = aggregation
             # Format data according to aggregation method
-            sc_ens_train_f, sc_ens_test_f, sc_obs_train_f, sc_obs_test_f = format_data(sc_ens_train,
-                                                                                       sc_ens_test,
-                                                                                       sc_obs_train,
-                                                                                       sc_obs_test,
-                                                                                       aggregation)
+            sc_ens_train_f, \
+            sc_ens_test_f, \
+            sc_obs_train_f, \
+            sc_obs_test_f = format_data(sc_ens_train,
+                                        sc_ens_test,
+                                        sc_obs_train,
+                                        sc_obs_test,
+                                        aggregation,
+                                        fixed_params["data_set"])
             if aggregation in ["single", "single+std"]:
                 batch_size = 100
             else:
